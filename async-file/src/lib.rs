@@ -2,10 +2,6 @@
 #![feature(option_unwrap_none)]
 #![feature(drain_filter)]
 
-#[cfg(test)]
-#[macro_use]
-extern crate lazy_static;
-
 mod event;
 mod file;
 mod page_cache;
@@ -19,6 +15,7 @@ mod tests {
     use self::runtime::Runtime;
     use super::*;
     use crate::event::waiter::{Waiter, WaiterQueue};
+    use lazy_static::lazy_static;
 
     #[test]
     fn it_works() {
@@ -77,13 +74,12 @@ mod tests {
             }
 
             fn auto_flush() {
-                /*
                 static INIT: Once = Once::new();
                 INIT.call_once(|| {
-                    let page_cache = &PAGE_CACHE;
-                    let flusher = &FLUSHER;
-                    let waiter_queue = &WAITER_QUEUE;
                     async_rt::task::spawn(async {
+                        let page_cache = &PAGE_CACHE;
+                        let flusher = &FLUSHER;
+                        let waiter_queue = &WAITER_QUEUE;
                         let waiter = Waiter::new();
                         waiter_queue.enqueue(&waiter);
                         loop {
@@ -99,7 +95,6 @@ mod tests {
                         }
                     });
                 });
-                */
 
                 if PAGE_CACHE.num_dirty_pages() >= DIRTY_HIGH_MARK {
                     WAITER_QUEUE.wake_all();
