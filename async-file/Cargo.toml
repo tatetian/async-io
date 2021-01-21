@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 array-init = "1.0"
-async-rt = { path = "../async-rt" }
+async-rt = { path = "../async-rt", features = ["auto_run"] }
 atomic = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"]  }
 intrusive-collections = "0.9"
@@ -16,4 +16,5 @@ itertools = "0.10"
 libc = "0.2"
 
 [dev-dependencies]
+ctor = "0.1"
 lazy_static = "1.4"

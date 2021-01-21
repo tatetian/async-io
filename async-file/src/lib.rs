@@ -102,4 +102,9 @@ mod tests {
             }
         }
     }
+
+    #[ctor::ctor]
+    fn auto_init_async_rt() {
+        async_rt::executor::set_parallelism(4);
+    }
 }

@@ -174,7 +174,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_basics() {
+    fn basics() {
         let mut list = LruList::<i32>::new();
         let entries: Vec<Arc<LruEntry<i32>>> = (0..5).map(|i| Arc::new(LruEntry::new(i))).collect();
         for entry in &entries {

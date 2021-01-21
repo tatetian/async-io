@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
 use atomic::{Atomic, Ordering};
@@ -103,5 +104,44 @@ impl WaiterQueue_ {
     pub fn new() -> Self {
         let list = LinkedList::new(LinkedListAdapter::new());
         Self { list }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use async_rt::task::JoinHandle;
+    use std::sync::Arc;
+
+    #[test]
+    fn wait_and_then_wake() {
+        async_rt::task::block_on(async {
+            let waiter_queue = Arc::new(WaiterQueue::new());
+
+            let num_waiters = 10;
+            let num_completed = Arc::new(AtomicUsize::new(0));
+            let join_handles: Vec<JoinHandle<()>> = (0..num_waiters)
+                .map(|_| {
+                    let num_completed = num_completed.clone();
+                    let waiter_queue = waiter_queue.clone();
+                    async_rt::task::spawn(async move {
+                        let waiter = Waiter::new();
+                        waiter_queue.enqueue(&waiter);
+                        waiter.wait().await;
+                        waiter_queue.dequeue(&waiter);
+                        num_completed.fetch_add(1, Ordering::Release);
+                    })
+                })
+                .collect();
+
+            while num_completed.load(Ordering::Acquire) < num_waiters {
+                waiter_queue.wake_all();
+                async_rt::sched::yield_().await;
+            }
+
+            for join_handle in join_handles {
+                join_handle.await;
+            }
+        });
     }
 }

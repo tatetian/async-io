@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,14 +10,14 @@ use std::task::{Context, Poll, Waker};
 /// The APIs of EventCounter are similar to that of Liunx's eventfd.
 pub struct Counter {
     counter: AtomicU64,
-    wakers: Mutex<Vec<Waker>>,
+    wakers: Mutex<VecDeque<Waker>>,
 }
 
 impl Counter {
     pub fn new(init_counter: u64) -> Self {
         Self {
             counter: AtomicU64::new(init_counter),
-            wakers: Mutex::new(Vec::new()),
+            wakers: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -26,12 +27,9 @@ impl Counter {
     pub fn write(&self) {
         let mut wakers = self.wakers.lock().unwrap();
 
-        let old_counter = self.counter.fetch_add(1, Ordering::Relaxed);
-        if old_counter > 0 {
-            return;
-        }
+        self.counter.fetch_add(1, Ordering::Relaxed);
 
-        for waker in wakers.drain(..) {
+        if let Some(waker) = wakers.pop_front() {
             waker.wake();
         }
     }
@@ -74,7 +72,39 @@ impl<'a> Future for Read<'a> {
         }
 
         let waker = cx.waker().clone();
-        wakers.push(waker);
+        wakers.push_back(waker);
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use super::*;
+
+    #[test]
+    fn read_and_then_write() {
+        async_rt::task::block_on(async {
+            let counter = Arc::new(Counter::new(0));
+
+            let join_handle0 = {
+                let counter = counter.clone();
+                async_rt::task::spawn(async move {
+                    counter.read().await;
+                })
+            };
+
+            let join_handle1 = {
+                let counter = counter.clone();
+                async_rt::task::spawn(async move {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    counter.write();
+                })
+            };
+
+            join_handle0.await;
+            join_handle1.await;
+        });
     }
 }
