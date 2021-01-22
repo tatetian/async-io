@@ -420,6 +420,44 @@ mod test {
         assert!(page_cache.num_dirty_pages() == 3);
     }
 
+    #[test]
+    fn hold_multiple_handles() {
+        let page_cache = PageCache::with_capacity(1);
+        let fd = 0;
+        let key = 0;
+        let handles = (0..10)
+            .map(|_| page_cache.acquire(fd, key).unwrap())
+            .collect::<Vec<PageHandle>>();
+        release_pages(&page_cache, handles.into_iter());
+    }
+
+    #[test]
+    fn fill_up_cache() {
+        let page_cache = PageCache::with_capacity(1);
+        let page_key = (0, 0);
+        visit_page(&page_cache, page_key, |state, _page_slice| {
+            **state = PageState::Dirty;
+        });
+        let another_page_key = (1, 0);
+        assert!(page_cache
+            .acquire(another_page_key.0, another_page_key.1)
+            .is_none());
+    }
+
+    #[test]
+    fn discard_page() {
+        let page_cache = PageCache::with_capacity(1);
+        let page_key = (0, 0);
+        visit_page(&page_cache, page_key, |state, _page_slice| {
+            **state = PageState::Dirty;
+        });
+        assert!(page_cache.num_dirty_pages() == 1);
+
+        let page_handle = page_cache.acquire(page_key.0, page_key.1).unwrap();
+        page_cache.discard(page_handle);
+        assert!(page_cache.num_dirty_pages() == 0);
+    }
+
     mod helper {
         use super::*;
         use std::sync::{Mutex, MutexGuard};
