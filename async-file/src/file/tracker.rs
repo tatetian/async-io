@@ -1,10 +1,12 @@
 use std::ops::RangeInclusive;
 use std::sync::{Mutex, MutexGuard};
 
+use itertools::Itertools;
+
 use crate::page_cache::Page;
 
 /// A few tuning knobs for the sequential read tracker.
-pub const MIN_PREFETCH_SIZE: usize = 4 * Page::size();
+pub const MIN_PREFETCH_SIZE: usize = Page::size();
 pub const MAX_PREFETCH_SIZE: usize = 64 * Page::size();
 pub const MAX_CONCURRENCY: usize = 3;
 
@@ -95,7 +97,7 @@ impl Tracker {
     }
 
     pub fn restart_from(&mut self, offset: usize, len: usize) {
-        self.seq_window = offset..=offset + len;
+        self.seq_window = (offset + len / 2)..=(offset + len);
         self.prefetch_size = INVALID_PREFETCH_SIZE;
     }
 }
@@ -127,9 +129,97 @@ impl<'a> SeqRd<'a> {
         };
 
         self.tracker.prefetch_size *= 2;
-        let max_prefetch_size = MAX_PREFETCH_SIZE.min(self.len * 2);
+        let max_prefetch_size = MAX_PREFETCH_SIZE.min(self.len * 4);
         if self.tracker.prefetch_size > max_prefetch_size {
             self.tracker.prefetch_size = max_prefetch_size;
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use self::helper::SeqRds;
+    use super::*;
+
+    #[test]
+    fn read_seq_one_thread() {
+        let tracker = SeqRdTracker::new();
+
+        let mut seq_rds = SeqRds::new(0, 4096, 10);
+        seq_rds.for_each(|(offset, buf_size)| {
+            let seq_rd = tracker.accept(offset, buf_size);
+            assert!(seq_rd.is_some());
+            let seq_rd = seq_rd.unwrap();
+            //println!("prefetch size = {}", seq_rd.prefetch_size());
+            seq_rd.complete(buf_size);
+        });
+    }
+
+    #[test]
+    fn read_seq_multi_threads() {
+        let tracker = SeqRdTracker::new();
+
+        let mixed_seq_rds = {
+            let seq_rds0 = SeqRds::new(0, 4096, 10);
+            let seq_rds1 = SeqRds::new(12345678, 1024, 8);
+            seq_rds0.interleave(seq_rds1)
+        };
+
+        let mut num_non_seq_rds = 0;
+        mixed_seq_rds.for_each(|(offset, buf_size)| {
+            if let Some(seq_rd) = tracker.accept(offset, buf_size) {
+                //println!("offset = {}, buf_size = {}: prefetch_size = {}", offset, buf_size, seq_rd.prefetch_size());
+                seq_rd.complete(buf_size);
+            } else {
+                //println!("offset = {}, buf_size = {}: non-sequential", offset, buf_size);
+                num_non_seq_rds += 1;
+            }
+        });
+        assert!(num_non_seq_rds <= 1);
+    }
+
+    #[test]
+    fn read_rand() {
+        let tracker = SeqRdTracker::new();
+        let random_rds = [(8, 16), (128, 16), (1024, 4)];
+        random_rds.into_iter().for_each(|(offset, buf_size)| {
+            let seq_rd = tracker.accept(*offset, *buf_size);
+            assert!(seq_rd.is_none());
+        });
+    }
+
+    mod helper {
+        use super::*;
+
+        pub struct SeqRds {
+            offset: usize,
+            buf_size: usize,
+            nrepeats_remain: usize,
+        }
+
+        impl SeqRds {
+            pub fn new(offset: usize, buf_size: usize, nrepeats: usize) -> Self {
+                Self {
+                    offset,
+                    buf_size,
+                    nrepeats_remain: nrepeats,
+                }
+            }
+        }
+
+        impl Iterator for SeqRds {
+            type Item = (usize /* offset */, usize /* buf_size */);
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.nrepeats_remain == 0 {
+                    return None;
+                }
+
+                let new_rd = (self.offset, self.buf_size);
+                self.offset += self.buf_size;
+                self.nrepeats_remain -= 1;
+                Some(new_rd)
+            }
         }
     }
 }
