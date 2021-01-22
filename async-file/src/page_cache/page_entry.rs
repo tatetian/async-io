@@ -123,3 +123,14 @@ impl PageEntryInner {
         self.fd
     }
 }
+
+impl std::fmt::Debug for PageEntryInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PageEntryInner")
+            .field("fd", &self.fd)
+            .field("offset", &self.offset)
+            .field("state", &*self.state.lock().unwrap())
+            .field("list_name", &self.list_name.load(Ordering::Relaxed))
+            .finish()
+    }
+}

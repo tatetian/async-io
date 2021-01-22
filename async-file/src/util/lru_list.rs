@@ -63,7 +63,9 @@ impl<T> LruList<T> {
 
     pub fn evict(&mut self) -> Option<Arc<LruEntry<T>>> {
         let ret = self.inner.pop_back();
-        if ret.is_some() {
+        if let Some(entry) = &ret {
+            let old_id = entry.list_id.swap(ObjectId::null(), Ordering::Relaxed);
+            debug_assert!(old_id == self.list_id);
             self.len -= 1;
         }
         ret
@@ -78,6 +80,8 @@ impl<T> LruList<T> {
                     break;
                 }
             };
+            let old_id = entry.list_id.swap(ObjectId::null(), Ordering::Relaxed);
+            debug_assert!(old_id == self.list_id);
             result.push(entry);
         }
         self.len -= result.len();
@@ -106,6 +110,8 @@ impl<T> LruList<T> {
             let should_evict = f(entry.inner());
             if should_evict {
                 let entry = cursor.remove().unwrap();
+                let old_id = entry.list_id.swap(ObjectId::null(), Ordering::Relaxed);
+                debug_assert!(old_id == self.list_id);
                 res.push(entry);
                 if res.len() >= max_count {
                     break;

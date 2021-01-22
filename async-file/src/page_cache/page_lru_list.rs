@@ -62,3 +62,11 @@ impl Default for PageLruList {
         Self::new()
     }
 }
+
+impl std::fmt::Debug for PageLruList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.inner.iter().map(|lru_entry| lru_entry.inner()))
+            .finish()
+    }
+}

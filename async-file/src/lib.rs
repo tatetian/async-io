@@ -1,6 +1,7 @@
 #![feature(get_mut_unchecked)]
 #![feature(option_unwrap_none)]
 #![feature(drain_filter)]
+#![feature(slice_fill)]
 
 mod event;
 mod file;
