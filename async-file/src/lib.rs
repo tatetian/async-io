@@ -18,9 +18,11 @@ mod tests {
     use crate::event::waiter::{Waiter, WaiterQueue};
     use lazy_static::lazy_static;
 
+    // TODO: enable this test after integrating with io_uring 
     #[test]
-    fn it_works() {
-        async fn hello_world() {
+    #[ignore]
+    fn hello_world() {
+        async_rt::task::block_on(async {
             let path = "tmp.data";
             let file = {
                 let path = path.to_string();
@@ -45,7 +47,7 @@ mod tests {
             assert!(retval as usize == input_buf.len());
             assert!(output_buf.len() == input_buf.len());
             assert!(output_buf == input_buf);
-        }
+        });
     }
 
     mod runtime {
