@@ -1,32 +1,36 @@
 use std::future::Future;
+use std::marker::PhantomData;
 
 use futures::future::{BoxFuture, FutureExt};
 use itertools::Itertools;
 
+use crate::file::{AsyncFile, AsyncFileRt};
 use crate::page_cache::{Page, PageCache, PageHandle, PageState};
 
 /// Flush dirty pages in a page cache.
-pub struct Flusher {
-    page_cache: &'static PageCache,
+pub struct Flusher<Rt: AsyncFileRt + ?Sized> {
+    phantom_data: PhantomData<Rt>,
 }
 
-impl Flusher {
-    pub fn new(page_cache: &'static PageCache) -> Self {
-        Self { page_cache }
+impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
+    pub fn new() -> Self {
+        Self {
+            phantom_data: PhantomData,
+        }
     }
 
     pub async fn flush_by_fd(&self, fd: i32, max_pages: usize) -> usize {
-        let mut dirty_pages = self.page_cache.evict_dirty_pages_by_fd(fd, max_pages);
+        let mut dirty_pages = Rt::page_cache().evict_dirty_pages_by_fd(fd, max_pages);
         self.do_flush(dirty_pages).await
     }
 
     pub async fn flush(&self, max_pages: usize) -> usize {
-        let mut dirty_pages = self.page_cache.evict_dirty_pages(max_pages);
+        let mut dirty_pages = Rt::page_cache().evict_dirty_pages(max_pages);
         self.do_flush(dirty_pages).await
     }
 
     async fn do_flush(&self, mut dirty_pages: Vec<PageHandle>) -> usize {
-        let page_cache = self.page_cache;
+        let page_cache = Rt::page_cache();
         // Remove all false positives in the supposed-to-be-dirty pages
         dirty_pages
             .drain_filter(|page| {
@@ -125,21 +129,32 @@ impl Flusher {
                 iov_len: Page::size(),
             })
             .collect();
-        let page_cache = self.page_cache;
-        let complete_fn = move |retval: i32| {
-            // TODO: handle partial writes or error
-            assert!(retval as usize == consecutive_pages.len() * Page::size());
+        let complete_fn = {
+            let page_cache = Rt::page_cache();
+            let file = {
+                let first_page = &consecutive_pages[0];
+                first_page
+                    .file()
+                    .clone()
+                    .downcast::<AsyncFile<Rt>>()
+                    .unwrap()
+            };
+            move |retval: i32| {
+                // TODO: handle partial writes or error
+                assert!(retval as usize == consecutive_pages.len() * Page::size());
 
-            for page in consecutive_pages {
-                let mut state = page.state();
-                match *state {
-                    PageState::Flushing => {
-                        *state = PageState::UpToDate;
-                    }
-                    _ => unreachable!(),
-                };
-                drop(state);
-                page_cache.release(page);
+                for page in consecutive_pages {
+                    let mut state = page.state();
+                    match *state {
+                        PageState::Flushing => {
+                            *state = PageState::UpToDate;
+                        }
+                        _ => unreachable!(),
+                    };
+                    drop(state);
+                    page_cache.release(page);
+                }
+                file.waiter_queue().wake_all();
             }
         };
         // FIXME: should we allocate the iovec on the heap and keep it alive until the completion?

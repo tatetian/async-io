@@ -4,7 +4,7 @@ use std::sync::RwLock;
 
 use crate::event::waiter::{Waiter, WaiterQueue};
 use crate::file::tracker::SeqRdTracker;
-use crate::page_cache::{Page, PageCache, PageHandle, PageState};
+use crate::page_cache::{AsFd, Page, PageCache, PageHandle, PageState};
 use crate::util::{align_down, align_up};
 
 pub use self::flusher::Flusher;
@@ -12,18 +12,8 @@ pub use self::flusher::Flusher;
 mod flusher;
 mod tracker;
 
-// check list
-// - [X] len
-//  - [X] len is updated correctly
-//  - [X] cannot read beyond len
-// - [ ] all blocking operation can be wake up eventually
-//  - [ ] how flusher can wake up file?
-// - [ ] io_uring usage
-// - [ ] corner cases
-// - [ ] no misuse of debug_assert!()
-
 /// An instance of file with async APIs.
-pub struct AsyncFile<Rt: AsyncFileRt> {
+pub struct AsyncFile<Rt: AsyncFileRt + ?Sized> {
     fd: i32,
     len: RwLock<usize>,
     can_read: bool,
@@ -39,15 +29,15 @@ pub struct AsyncFile<Rt: AsyncFileRt> {
 /// needs Flusher to persist data, and eventually depends on IoUring to perform
 /// async I/O. This trait provides a common interface for user-implemented runtimes
 /// that support AsyncFile.
-pub trait AsyncFileRt {
+pub trait AsyncFileRt: Send + Sync + 'static {
     /// Returns the io_uring instance.
     //fn io_uring() -> &'static IoUring;
     fn page_cache() -> &'static PageCache;
-    fn flusher() -> &'static Flusher;
+    fn flusher() -> &'static Flusher<Self>;
     fn auto_flush();
 }
 
-impl<Rt: AsyncFileRt> AsyncFile<Rt> {
+impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
     /// Open a file at a given path.
     ///
     /// The three arguments have the same meaning as the open syscall.
@@ -210,7 +200,7 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
                 should_call_access_fn = false;
             }
 
-            let page = page_cache.acquire(self.fd, page_offset).unwrap();
+            let page = page_cache.acquire(self, page_offset).unwrap();
             let mut state = page.state();
             if should_call_access_fn {
                 // The fetching phase
@@ -370,7 +360,7 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
         let page_begin = align_down(offset, Page::size());
         let page_end = align_up(offset + buf.len(), Page::size());
         for page_offset in (page_begin..page_end).step_by(Page::size()) {
-            let page_handle = page_cache.acquire(self.fd, page_offset).unwrap();
+            let page_handle = page_cache.acquire(self, page_offset).unwrap();
             let inner_offset = offset + write_nbytes - page_offset;
 
             let copy_size = {
@@ -465,7 +455,13 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
     }
 }
 
-impl<Rt: AsyncFileRt> Drop for AsyncFile<Rt> {
+impl<Rt: AsyncFileRt + ?Sized> AsFd for AsyncFile<Rt> {
+    fn as_fd(&self) -> i32 {
+        self.fd
+    }
+}
+
+impl<Rt: AsyncFileRt + ?Sized> Drop for AsyncFile<Rt> {
     fn drop(&mut self) {
         unsafe {
             libc::close(self.fd);

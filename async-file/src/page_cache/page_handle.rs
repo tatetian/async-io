@@ -1,6 +1,7 @@
-use std::sync::MutexGuard;
+use std::any::Any;
+use std::sync::{Arc, MutexGuard};
 
-use crate::page_cache::{Page, PageEntry, PageState};
+use crate::page_cache::{AsFd, Page, PageEntry, PageState};
 
 /// Page handle is the user's view of page entry.
 ///
@@ -17,6 +18,10 @@ impl PageHandle {
 
     pub(crate) fn unwrap(self) -> PageEntry {
         unsafe { std::mem::transmute(self) }
+    }
+
+    pub fn file(&self) -> &Arc<dyn Any + Send + Sync> {
+        self.0.file()
     }
 
     pub fn fd(&self) -> i32 {

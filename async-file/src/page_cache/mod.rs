@@ -1,7 +1,8 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 mod page;
 mod page_entry;
@@ -22,6 +23,10 @@ pub struct PageCache {
     num_allocated: AtomicUsize,
     map: Mutex<HashMap<(i32, usize), PageEntry>>,
     lru_lists: [Mutex<PageLruList>; 3],
+}
+
+pub trait AsFd {
+    fn as_fd(&self) -> i32;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,10 +62,13 @@ impl PageCache {
     /// Acquire a page handle for the given fd and offset.
     ///
     /// The returned page handle may be fetched from the cache or newly created.
-    pub fn acquire(&self, fd: i32, offset: usize) -> Option<PageHandle> {
-        debug_assert!(fd >= 0 && offset % Page::size() == 0);
+    pub fn acquire<F>(&self, file: &Arc<F>, offset: usize) -> Option<PageHandle>
+    where
+        F: AsFd + Send + Sync + 'static,
+    {
+        debug_assert!(offset % Page::size() == 0);
 
-        let key = (fd, offset);
+        let key = (file.as_fd(), offset);
         let mut map = self.map.lock().unwrap();
 
         // Try to get an existing entry in the map.
@@ -75,14 +83,14 @@ impl PageCache {
         let new_entry = if let Some(mut reusable_entry) = reusable_entry_opt {
             unsafe {
                 debug_assert!(PageEntry::refcnt(&reusable_entry) == 1);
-                reusable_entry.reset_key((fd, offset));
+                reusable_entry.reset(file.clone(), offset);
             }
             reusable_entry
         }
         // Second attempt: allocate a new entry if the capacity won't be exceeded
         else if self.num_allocated.load(Ordering::Relaxed) < self.capacity {
             self.num_allocated.fetch_add(1, Ordering::Relaxed);
-            PageEntry::new(fd, offset)
+            PageEntry::new(file.clone(), offset)
         }
         // Last attempt: evict an entry from the evictable LRU list
         else {
@@ -97,7 +105,7 @@ impl PageCache {
 
             unsafe {
                 debug_assert!(PageEntry::refcnt(&evicted_entry) == 1);
-                evicted_entry.reset_key((fd, offset));
+                evicted_entry.reset(file.clone(), offset);
                 *evicted_entry.state() = PageState::Uninit;
             }
             evicted_entry
@@ -132,9 +140,17 @@ impl PageCache {
         }
     }
 
-    /// Evict some LRU dirty pages with a fd.
+    /// Evict some LRU dirty pages of a file.
     ///
     /// Note that the results may contain false positives.
+    pub fn evict_dirty_pages_by_file<F: AsFd>(
+        &self,
+        file: &F,
+        max_count: usize,
+    ) -> Vec<PageHandle> {
+        self.evict_dirty_pages_by_fd(file.as_fd(), max_count)
+    }
+
     pub fn evict_dirty_pages_by_fd(&self, fd: i32, max_count: usize) -> Vec<PageHandle> {
         let mut lru_dirty_list = self.acquire_lru_list(LruListName::Dirty);
         let cond = |entry: &PageEntryInner| entry.fd() == fd;
@@ -293,18 +309,26 @@ impl std::fmt::Debug for PageCache {
 
 #[cfg(test)]
 mod test {
-    use self::helper::{release_pages, visit_page};
+    use self::helper::{release_pages, visit_page, File};
     use super::*;
+
+    // Create a dummy file object.
+    macro_rules! file {
+        ($fd:expr) => {{
+            let fd = $fd;
+            Arc::new(File(fd))
+        }};
+    }
 
     #[test]
     fn create_an_uptodate_page() {
         let page_cache = PageCache::with_capacity(1);
-        let page_key = (0, 0);
-        visit_page(&page_cache, page_key, |state, _page_slice| {
+        let page_key = (file!(0), 0);
+        visit_page(&page_cache, &page_key, |state, _page_slice| {
             assert!(**state == PageState::Uninit);
             **state = PageState::UpToDate;
         });
-        visit_page(&page_cache, page_key, |state, _page_slice| {
+        visit_page(&page_cache, &page_key, |state, _page_slice| {
             assert!(**state == PageState::UpToDate);
         });
     }
@@ -312,11 +336,11 @@ mod test {
     #[test]
     fn write_and_read_a_page() {
         let page_cache = PageCache::with_capacity(1);
-        let page_key = (0, 0);
-        visit_page(&page_cache, page_key, |_state, page_slice| {
+        let page_key = (file!(0), 0);
+        visit_page(&page_cache, &page_key, |_state, page_slice| {
             page_slice.fill(0xab);
         });
-        visit_page(&page_cache, page_key, |_state, page_slice| {
+        visit_page(&page_cache, &page_key, |_state, page_slice| {
             assert!(page_slice.iter().all(|b| *b == 0xab));
         });
     }
@@ -325,9 +349,9 @@ mod test {
     fn garbage_collect_useless_pages() {
         let page_cache = PageCache::with_capacity(4);
         for i in (0..1000) {
-            let fd = 10;
+            let file = file!(0);
             let offset = i * Page::size();
-            visit_page(&page_cache, (fd, offset), |state, _page_slice| {
+            visit_page(&page_cache, &(file, offset), |state, _page_slice| {
                 assert!(**state == PageState::Uninit);
                 // Both Uninit and UpToDate pages can be recycled. We set some pages as UpToDate.
                 if offset % 3 == 0 {
@@ -342,24 +366,25 @@ mod test {
         let page_cache = PageCache::with_capacity(2);
         assert!(page_cache.num_dirty_pages() == 0);
 
-        let page_keys = [(0, 0), (0, Page::size())];
+        let file = file!(0);
+        let page_keys = [(file.clone(), 0), (file.clone(), Page::size())];
         // Mark page 0 dirty
-        visit_page(&page_cache, page_keys[0], |state, _page_slice| {
+        visit_page(&page_cache, &page_keys[0], |state, _page_slice| {
             **state = PageState::Dirty;
         });
         assert!(page_cache.num_dirty_pages() == 1);
         // Mark page 1 dirty
-        visit_page(&page_cache, page_keys[1], |state, _page_slice| {
+        visit_page(&page_cache, &page_keys[1], |state, _page_slice| {
             **state = PageState::Dirty;
         });
         assert!(page_cache.num_dirty_pages() == 2);
         // Clean up page 1
-        visit_page(&page_cache, page_keys[1], |state, _page_slice| {
+        visit_page(&page_cache, &page_keys[1], |state, _page_slice| {
             **state = PageState::UpToDate;
         });
         assert!(page_cache.num_dirty_pages() == 1);
         // Clean up page 0
-        visit_page(&page_cache, page_keys[0], |state, _page_slice| {
+        visit_page(&page_cache, &page_keys[0], |state, _page_slice| {
             **state = PageState::UpToDate;
         });
         assert!(page_cache.num_dirty_pages() == 0);
@@ -370,24 +395,24 @@ mod test {
         // The cache can contain at most two pages
         let page_cache = PageCache::with_capacity(2);
 
-        let page_keys = [(0, 0), (1, 0), (2, 0)];
+        let page_keys = [(file!(0), 0), (file!(1), 0), (file!(2), 0)];
         // Touch page 0
-        visit_page(&page_cache, page_keys[0], |state, _page_slice| {
+        visit_page(&page_cache, &page_keys[0], |state, _page_slice| {
             **state = PageState::UpToDate;
         });
         // Touch page 1
-        visit_page(&page_cache, page_keys[1], |state, _page_slice| {
+        visit_page(&page_cache, &page_keys[1], |state, _page_slice| {
             **state = PageState::UpToDate;
         });
         // Touch page 2, evicting page 0
-        visit_page(&page_cache, page_keys[2], |_state, _page_slice| {});
+        visit_page(&page_cache, &page_keys[2], |_state, _page_slice| {});
         // Revisit page 0, whose state must be Uninit, since it has been evicted.
         // By revisting page 0, we have now evicted page 1.
-        visit_page(&page_cache, page_keys[0], |state, _page_slice| {
+        visit_page(&page_cache, &page_keys[0], |state, _page_slice| {
             assert!(**state == PageState::Uninit);
         });
         // Revisit page 1, which must be still in the cache
-        visit_page(&page_cache, page_keys[1], |state, _page_slice| {
+        visit_page(&page_cache, &page_keys[1], |state, _page_slice| {
             assert!(**state == PageState::UpToDate);
         });
     }
@@ -397,9 +422,9 @@ mod test {
         let page_cache = PageCache::with_capacity(3);
 
         // Mark three pages as dirty
-        let page_keys = [(0, 0), (1, 0), (2, 0)];
+        let page_keys = [(file!(0), 0), (file!(1), 0), (file!(2), 0)];
         for page_key in &page_keys {
-            visit_page(&page_cache, *page_key, |state, _page_slice| {
+            visit_page(&page_cache, page_key, |state, _page_slice| {
                 **state = PageState::Dirty;
             });
         }
@@ -423,10 +448,10 @@ mod test {
     #[test]
     fn hold_multiple_handles() {
         let page_cache = PageCache::with_capacity(1);
-        let fd = 0;
+        let file = file!(10);
         let key = 0;
         let handles = (0..10)
-            .map(|_| page_cache.acquire(fd, key).unwrap())
+            .map(|_| page_cache.acquire(&file, key).unwrap())
             .collect::<Vec<PageHandle>>();
         release_pages(&page_cache, handles.into_iter());
     }
@@ -434,39 +459,59 @@ mod test {
     #[test]
     fn fill_up_cache() {
         let page_cache = PageCache::with_capacity(1);
-        let page_key = (0, 0);
-        visit_page(&page_cache, page_key, |state, _page_slice| {
+        let page_key = (file!(0), 0);
+        visit_page(&page_cache, &page_key, |state, _page_slice| {
             **state = PageState::Dirty;
         });
-        let another_page_key = (1, 0);
+        let another_page_key = (file!(1), Page::size());
         assert!(page_cache
-            .acquire(another_page_key.0, another_page_key.1)
+            .acquire(&another_page_key.0, another_page_key.1)
             .is_none());
     }
 
     #[test]
     fn discard_page() {
         let page_cache = PageCache::with_capacity(1);
-        let page_key = (0, 0);
-        visit_page(&page_cache, page_key, |state, _page_slice| {
+        let page_key = (file!(0), 0);
+        visit_page(&page_cache, &page_key, |state, _page_slice| {
             **state = PageState::Dirty;
         });
         assert!(page_cache.num_dirty_pages() == 1);
 
-        let page_handle = page_cache.acquire(page_key.0, page_key.1).unwrap();
+        let page_handle = page_cache.acquire(&page_key.0, page_key.1).unwrap();
         page_cache.discard(page_handle);
         assert!(page_cache.num_dirty_pages() == 0);
+    }
+
+    #[test]
+    fn downcast_file() {
+        let page_cache = PageCache::with_capacity(1);
+        let input_file = file!(1234);
+        let offset = 0;
+        let page_handle = page_cache.acquire(&input_file, offset).unwrap();
+        let result_file = page_handle.file().clone().downcast::<File>().unwrap();
+        assert!(input_file == result_file);
+        page_cache.release(page_handle);
     }
 
     mod helper {
         use super::*;
         use std::sync::{Mutex, MutexGuard};
 
-        pub fn visit_page<F>(page_cache: &PageCache, page_key: (i32, usize), visit_fn: F)
+        #[derive(Debug, PartialEq, Eq)]
+        pub struct File(pub i32);
+
+        impl AsFd for File {
+            fn as_fd(&self) -> i32 {
+                self.0
+            }
+        }
+
+        pub fn visit_page<F>(page_cache: &PageCache, page_key: &(Arc<File>, usize), visit_fn: F)
         where
             F: FnOnce(&mut MutexGuard<PageState>, &mut [u8]),
         {
-            let page_handle = page_cache.acquire(page_key.0, page_key.1).unwrap();
+            let page_handle = page_cache.acquire(&page_key.0, page_key.1).unwrap();
             let mut state = page_handle.state();
             let page_slice_mut = unsafe { page_handle.page().as_slice_mut() };
 

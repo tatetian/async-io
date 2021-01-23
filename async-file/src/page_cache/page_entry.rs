@@ -1,9 +1,10 @@
+use std::any::Any;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use atomic::{Atomic, Ordering};
 
 use super::LruListName;
-use crate::page_cache::{Page, PageState};
+use crate::page_cache::{AsFd, Page, PageState};
 use crate::util::lru_list::LruEntry;
 
 /// A page entry represents a cache page in the page cache.
@@ -14,6 +15,7 @@ use crate::util::lru_list::LruEntry;
 pub struct PageEntry(Arc<LruEntry<PageEntryInner>>);
 
 pub struct PageEntryInner {
+    file: Arc<dyn Any + Send + Sync>,
     fd: i32,
     offset: usize,
     state: Mutex<PageState>,
@@ -24,8 +26,11 @@ pub struct PageEntryInner {
 // Implementationn for PageEntry
 
 impl PageEntry {
-    pub fn new(fd: i32, offset: usize) -> Self {
-        let inner = PageEntryInner::new(fd, offset);
+    pub fn new<F>(file: Arc<F>, offset: usize) -> Self
+    where
+        F: AsFd + Send + Sync + 'static,
+    {
+        let inner = PageEntryInner::new(file, offset);
         let new_self = Self(Arc::new(LruEntry::new(inner)));
         new_self
     }
@@ -43,13 +48,21 @@ impl PageEntry {
         (self.fd(), self.offset())
     }
 
-    pub unsafe fn reset_key(&mut self, key: (i32, usize)) {
+    pub unsafe fn reset<F>(&mut self, file: Arc<F>, offset: usize)
+    where
+        F: AsFd + Send + Sync + 'static,
+    {
         debug_assert!(Arc::strong_count(&self.0) == 1);
         debug_assert!(Arc::weak_count(&self.0) == 0);
 
         let inner_mut = Arc::get_mut_unchecked(&mut self.0);
-        inner_mut.inner_mut().fd = key.0;
-        inner_mut.inner_mut().offset = key.1;
+        inner_mut.inner_mut().fd = file.as_fd();
+        inner_mut.inner_mut().file = file as Arc<dyn Any + Send + Sync>;
+        inner_mut.inner_mut().offset = offset;
+    }
+
+    pub fn file(&self) -> &Arc<dyn Any + Send + Sync> {
+        &self.0.inner().file
     }
 
     pub fn fd(&self) -> i32 {
@@ -108,9 +121,15 @@ impl std::fmt::Debug for PageEntry {
 // Implementationn for PageEntryInner
 
 impl PageEntryInner {
-    pub fn new(fd: i32, offset: usize) -> Self {
+    pub fn new<F>(file: Arc<F>, offset: usize) -> Self
+    where
+        F: AsFd + Send + Sync + 'static,
+    {
         debug_assert!(offset % Page::size() == 0);
+        let fd = file.as_fd();
+        let file = file as Arc<dyn Any + Send + Sync>;
         Self {
+            file,
             fd,
             offset,
             state: Mutex::new(PageState::Uninit),

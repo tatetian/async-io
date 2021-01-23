@@ -9,7 +9,7 @@ mod page_cache;
 mod util;
 
 pub use crate::file::{AsyncFile, AsyncFileRt, Flusher};
-pub use crate::page_cache::{Page, PageCache, PageHandle};
+pub use crate::page_cache::{AsFd, Page, PageCache, PageHandle, PageState};
 
 #[cfg(test)]
 mod tests {
@@ -61,7 +61,7 @@ mod tests {
 
         lazy_static! {
             static ref PAGE_CACHE: PageCache = PageCache::with_capacity(PAGE_CACHE_SIZE);
-            static ref FLUSHER: Flusher = Flusher::new(&PAGE_CACHE);
+            static ref FLUSHER: Flusher<Runtime> = Flusher::new();
             static ref WAITER_QUEUE: WaiterQueue = WaiterQueue::new();
         }
 
@@ -70,7 +70,7 @@ mod tests {
                 &PAGE_CACHE
             }
 
-            fn flusher() -> &'static Flusher {
+            fn flusher() -> &'static Flusher<Self> {
                 &FLUSHER
             }
 
