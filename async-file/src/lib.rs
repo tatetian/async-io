@@ -91,7 +91,7 @@ mod tests {
 
                             // Stop flushing until the # of dirty pages falls below the low watermark
                             while page_cache.num_dirty_pages() > DIRTY_LOW_MARK {
-                                flusher.flush(MAX_DIRTY_PAGES_PER_FLUSH);
+                                flusher.flush(MAX_DIRTY_PAGES_PER_FLUSH).await;
                             }
                         }
                     });

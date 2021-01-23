@@ -12,6 +12,16 @@ pub use self::flusher::Flusher;
 mod flusher;
 mod tracker;
 
+// check list
+// - [X] len
+//  - [X] len is updated correctly
+//  - [X] cannot read beyond len
+// - [ ] all blocking operation can be wake up eventually
+//  - [ ] how flusher can wake up file?
+// - [ ] io_uring usage
+// - [ ] corner cases
+// - [ ] no misuse of debug_assert!()
+
 /// An instance of file with async APIs.
 pub struct AsyncFile<Rt: AsyncFileRt> {
     fd: i32,
@@ -23,12 +33,12 @@ pub struct AsyncFile<Rt: AsyncFileRt> {
     phantom_data: PhantomData<Rt>,
 }
 
-/// The runtime support of AsyncFile.
+/// The runtime support for AsyncFile.
 ///
 /// AsyncFile cannot work on its own: it leverages PageCache to accelerate I/O,
 /// needs Flusher to persist data, and eventually depends on IoUring to perform
 /// async I/O. This trait provides a common interface for user-implemented runtimes
-/// that bind the runtime dependencies of AsyncFile with AsyncFile itself.
+/// that support AsyncFile.
 pub trait AsyncFileRt {
     /// Returns the io_uring instance.
     //fn io_uring() -> &'static IoUring;
@@ -38,8 +48,8 @@ pub trait AsyncFileRt {
 }
 
 impl<Rt: AsyncFileRt> AsyncFile<Rt> {
-    /// Open a file at a given path.ZA Z$%
-    ///uy
+    /// Open a file at a given path.
+    ///
     /// The three arguments have the same meaning as the open syscall.
     pub fn open(mut path: String, flags: i32, mode: i32) -> Result<Arc<Self>, i32> {
         let (can_read, can_write) = if flags & libc::O_RDONLY != 0 {
@@ -79,12 +89,19 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
     }
 
     pub async fn read_at(self: &Arc<Self>, offset: usize, buf: &mut [u8]) -> i32 {
+        if !self.can_read {
+            return -libc::EBADF;
+        }
+        if buf.len() == 0 {
+            return 0;
+        }
+
         // Prevent offset calculation from overflow
         if offset >= usize::max_value() / 2 {
             return -libc::EINVAL;
         }
         // Prevent the return length (i32) from overflow
-        if buf.len() >= i32::max_value() as usize {
+        if buf.len() > i32::max_value() as usize {
             return -libc::EINVAL;
         }
 
@@ -109,20 +126,19 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
         retval
     }
 
-    fn try_read_at(self: &Arc<Self>, offset: usize, _buf: &mut [u8]) -> i32 {
+    fn try_read_at(self: &Arc<Self>, offset: usize, buf: &mut [u8]) -> i32 {
         let file_len = *self.len.read().unwrap();
 
         // For reads beyond the end of the file
         if offset >= file_len {
-            for b in _buf.iter_mut() {
-                *b = 0;
-            }
-            return _buf.len() as i32;
+            // EOF
+            return 0;
         }
+
         // For reads within the bound of the file
         let file_remaining = file_len - offset;
-        let buf_len = _buf.len().min(file_remaining);
-        let buf = &mut _buf[..buf_len];
+        let buf_len = buf.len().min(file_remaining);
+        let buf = &mut buf[..buf_len];
 
         // Determine if it is a sequential read and how much data to prefetch
         let seq_rd = self.seq_rd_tracker.accept(offset, buf.len());
@@ -132,18 +148,22 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
             prefetch_len.min(max_prefetch_len)
         };
 
-        // Fetch the data to the page cache and copy data from the first ready pages to
-        // the read buffer.
+        // Fetch the data to the page cache and copy the data of the first ready pages
+        // in the page cache to the output buffer.
         let mut read_nbytes = 0;
-        let access_first_ready_pages = |page_handle: &PageHandle| {
-            let copy_offset = offset + read_nbytes - page_handle.offset();
-            let copy_size = Page::size().min(buf_len - read_nbytes);
+        self.fetch_pages(offset, buf_len, prefetch_len, |page_handle: &PageHandle| {
             let page_slice = unsafe { page_handle.page().as_slice() };
-            let target_buf = &mut buf[copy_offset..copy_offset + copy_size];
-            target_buf.copy_from_slice(&page_slice[..copy_size]);
+            let inner_offset = offset + read_nbytes - page_handle.offset();
+            let page_remain = Page::size() - inner_offset;
+
+            let buf_remain = buf_len - read_nbytes;
+            let copy_size = buf_remain.min(page_remain);
+            let src_buf = &page_slice[inner_offset..inner_offset + copy_size];
+            let target_buf = &mut buf[read_nbytes..read_nbytes + copy_size];
+            target_buf.copy_from_slice(src_buf);
+
             read_nbytes += copy_size;
-        };
-        self.fetch_pages(offset, buf_len, prefetch_len, access_first_ready_pages);
+        });
 
         if read_nbytes > 0 {
             seq_rd.map(|seq_rd| seq_rd.complete(read_nbytes));
@@ -153,6 +173,21 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
         }
     }
 
+    // Fetch and prefetch pages.
+    //
+    // The first pages in the fetch range [offset, offset + len) that are ready to read are passed
+    // to a closure so that the caller can access the data in these pages. Note that the state of the
+    // page is locked while the closure is being executed.
+    //
+    // The pages that are within the range [offset, offset + len + prefetch_len] will be fetched into
+    // the page cache, if they are not present in the page cache.
+    //
+    // The procedure works in two phases. The first phase is fetching, in which we iterate
+    // the first pages that are ready to read. These pages are passed to the access closure
+    // one-by-one. Upon reaching the first page that cannot be read or beyond the fetching
+    // range [offset, offset + len), we transit to the second phase: prefetching. In this
+    // phase, we will try out our best to bring the pages into the page cache,
+    // issueing async reads if needed.
     fn fetch_pages(
         self: &Arc<Self>,
         offset: usize,
@@ -160,20 +195,24 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
         prefetch_len: usize,
         mut access_fn: impl FnMut(&PageHandle),
     ) {
-        let page_cache = Rt::page_cache();
+        // If the first stage, the value is true; if the second stage, false.
+        let mut should_call_access_fn = true;
+        // Prepare for async read that fetches multiple consecutive pages
         let mut consecutive_pages = Vec::new();
-        let offset_end = align_up(offset + len + prefetch_len, Page::size());
-        let offset_begin = align_down(offset, Page::size());
+
+        // Enter the loop that fetches and prefetches pages.
+        let page_cache = Rt::page_cache();
+        let page_begin = align_down(offset, Page::size());
+        let page_end = align_up(offset + len + prefetch_len, Page::size());
         let fetch_end = align_up(offset + len, Page::size());
-        let mut is_fetching = true;
-        for offset in (offset_begin..offset_end).step_by(Page::size()) {
-            if is_fetching && offset >= fetch_end {
-                is_fetching = false;
+        for page_offset in (page_begin..page_end).step_by(Page::size()) {
+            if should_call_access_fn && page_offset >= fetch_end {
+                should_call_access_fn = false;
             }
 
-            let page = page_cache.acquire(self.fd, offset).unwrap();
+            let page = page_cache.acquire(self.fd, page_offset).unwrap();
             let mut state = page.state();
-            if is_fetching {
+            if should_call_access_fn {
                 // The fetching phase
                 match *state {
                     PageState::UpToDate | PageState::Dirty | PageState::Flushing => {
@@ -190,7 +229,7 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
                         consecutive_pages.push(page);
 
                         // Transit to the prefetching phase
-                        is_fetching = false;
+                        should_call_access_fn = false;
                     }
                     PageState::Fetching => {
                         // We do nothing here
@@ -198,7 +237,7 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
                         page_cache.release(page);
 
                         // Transit to the prefetching phase
-                        is_fetching = false;
+                        should_call_access_fn = false;
                     }
                 }
             } else {
@@ -210,26 +249,38 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
                         drop(state);
                         consecutive_pages.push(page);
                     }
-                    _ => {
+                    PageState::UpToDate
+                    | PageState::Dirty
+                    | PageState::Flushing
+                    | PageState::Fetching => {
                         drop(state);
                         page_cache.release(page);
 
                         // When reaching the end of consecutive pages, start the I/O
                         if consecutive_pages.len() > 0 {
-                            self.read_consecutive_pages(consecutive_pages);
+                            self.fetch_consecutive_pages(consecutive_pages);
+                            consecutive_pages = Vec::new();
                         }
-                        consecutive_pages = Vec::new();
                     }
                 }
             }
         }
         // When reaching the end of consecutive pages, start the I/O
         if consecutive_pages.len() > 0 {
-            self.read_consecutive_pages(consecutive_pages);
+            self.fetch_consecutive_pages(consecutive_pages);
         }
     }
 
-    fn read_consecutive_pages(self: &Arc<Self>, consecutive_pages: Vec<PageHandle>) {
+    fn fetch_consecutive_pages(self: &Arc<Self>, consecutive_pages: Vec<PageHandle>) {
+        debug_assert!(!consecutive_pages.is_empty());
+        debug_assert!(consecutive_pages.windows(2).all(|two_pages| {
+            let (p0, p1) = (&two_pages[0], &two_pages[1]);
+            p0.offset() + Page::size() == p1.offset()
+        }));
+        debug_assert!(consecutive_pages
+            .iter()
+            .all(|page| { *page.state() == PageState::Fetching }));
+
         let first_offset = consecutive_pages[0].offset();
         let self_ = self.clone();
         let iovecs = consecutive_pages
@@ -243,25 +294,45 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
             let page_cache = Rt::page_cache();
             let read_nbytes = if retval >= 0 { retval } else { 0 } as usize;
             for page in consecutive_pages {
+                let page_offset = page.offset();
+                debug_assert!(page_offset >= first_offset);
+
+                // For a partial read, fill zeros or in the remaining part of the page.
+                // TODO: are there partial reads that should not fill zeros?
+                let page_valid_nbytes = if first_offset + read_nbytes > page_offset {
+                    (first_offset + read_nbytes - page_offset).min(Page::size())
+                } else {
+                    0
+                };
+                if page_valid_nbytes < Page::size() {
+                    let page_slice = unsafe { page.page().as_slice_mut() };
+                    page_slice[page_valid_nbytes..].fill(0);
+                }
+
+                // Update page state
                 {
                     let mut state = page.state();
                     debug_assert!(*state == PageState::Fetching);
-                    if page.offset() + Page::size() < first_offset + read_nbytes {
-                        *state = PageState::UpToDate;
-                    } else {
-                        *state = PageState::Uninit;
-                    }
+                    *state = PageState::UpToDate;
                 }
                 page_cache.release(page);
             }
-            //self_.waiter_queue.wake_all();
+            self_.waiter_queue.wake_all();
         };
+        // TODO: should allocate iovec on the heap and keep it alive?
         //let io_uring = self.io_uring();
         //let handle = io_uring::readv(fd, first_offset, iovecs.as_mut_ptr(), iovecs.len(), callback);
         //drop(handle);
     }
 
     pub async fn write_at(self: &Arc<Self>, offset: usize, buf: &[u8]) -> i32 {
+        if !self.can_write {
+            return -libc::EBADF;
+        }
+        if buf.len() == 0 {
+            return 0;
+        }
+
         // Fast path
         let retval = self.try_write(offset, buf);
         if retval != -libc::EAGAIN {
@@ -289,63 +360,73 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
             return -libc::EINVAL;
         }
         // Prevent the return length (i32) from overflow
-        if buf.len() >= i32::max_value() as usize {
+        if buf.len() > i32::max_value() as usize {
             return -libc::EINVAL;
         }
 
         let mut new_dirty_pages = false;
         let mut write_nbytes = 0;
         let page_cache = Rt::page_cache();
-        let offset_end = align_up(offset + buf.len(), Page::size());
-        let offset_begin = align_down(offset, Page::size());
-        for page_offset in (offset_begin..offset_end).step_by(Page::size()) {
-            let copy_offset = offset + write_nbytes - page_offset;
-            let copy_size = Page::size().min(buf.len() - write_nbytes);
-            let to_write_full_page = copy_offset == 0 && copy_size == Page::size();
+        let page_begin = align_down(offset, Page::size());
+        let page_end = align_up(offset + buf.len(), Page::size());
+        for page_offset in (page_begin..page_end).step_by(Page::size()) {
+            let page_handle = page_cache.acquire(self.fd, page_offset).unwrap();
+            let inner_offset = offset + write_nbytes - page_offset;
 
-            let mut do_write = |page_handle: &PageHandle| {
+            let copy_size = {
+                let page_remain = Page::size() - inner_offset;
+                let buf_remain = buf.len() - write_nbytes;
+                buf_remain.min(page_remain)
+            };
+            let to_write_full_page = copy_size == Page::size();
+
+            let mut do_write = || {
                 let page_slice = unsafe { page_handle.page().as_slice_mut() };
+
                 let src_buf = &buf[write_nbytes..write_nbytes + copy_size];
-                page_slice[copy_offset..copy_offset + copy_size].copy_from_slice(src_buf);
+                let dst_buf = &mut page_slice[inner_offset..inner_offset + copy_size];
+                dst_buf.copy_from_slice(src_buf);
+
                 write_nbytes += copy_size;
             };
 
-            let page = page_cache.acquire(self.fd, page_offset).unwrap();
-            let mut state = page.state();
+            let mut state = page_handle.state();
             match *state {
                 PageState::UpToDate => {
-                    (do_write)(&page);
+                    (do_write)();
 
                     *state = PageState::Dirty;
-                    new_dirty_pages = true;
                     drop(state);
-                    page_cache.release(page);
-                }
-                PageState::Uninit if to_write_full_page => {
-                    (do_write)(&page);
+                    page_cache.release(page_handle);
 
-                    *state = PageState::Dirty;
                     new_dirty_pages = true;
-                    drop(state);
-                    page_cache.release(page);
                 }
                 PageState::Dirty => {
-                    (do_write)(&page);
+                    (do_write)();
 
                     drop(state);
-                    page_cache.release(page);
+                    page_cache.release(page_handle);
+                }
+                PageState::Uninit if to_write_full_page => {
+                    (do_write)();
+
+                    *state = PageState::Dirty;
+                    drop(state);
+                    page_cache.release(page_handle);
+
+                    new_dirty_pages = true;
                 }
                 PageState::Uninit => {
                     *state = PageState::Fetching;
                     drop(state);
-                    page_cache.release(page);
 
+                    self.fetch_consecutive_pages(vec![page_handle]);
                     break;
                 }
                 PageState::Fetching | PageState::Flushing => {
                     // We do nothing here
                     drop(state);
-                    page_cache.release(page);
+                    page_cache.release(page_handle);
 
                     break;
                 }
@@ -370,8 +451,17 @@ impl<Rt: AsyncFileRt> AsyncFile<Rt> {
     }
 
     pub async fn flush(&self) {
-        // TODO: set a max value
-        Rt::flusher().flush_by_fd(self.fd, usize::max_value()).await;
+        loop {
+            const FLUSH_BATCH_SIZE: usize = 64;
+            let num_flushed = Rt::flusher().flush_by_fd(self.fd, FLUSH_BATCH_SIZE).await;
+            if num_flushed == 0 {
+                return;
+            }
+        }
+    }
+
+    pub(crate) fn waiter_queue(&self) -> &WaiterQueue {
+        &self.waiter_queue
     }
 }
 

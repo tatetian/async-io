@@ -19,21 +19,7 @@ impl Flusher {
         let mut dirty_pages = self.page_cache.evict_dirty_pages_by_fd(fd, max_pages);
         self.do_flush(dirty_pages).await
     }
-    /*
-        pub fn flush_by_watermarks(&self) -> usize {
-            let num_dirty_pages = page_cache.num_dirty_pages();
-            if nun_dirty_pages < self.high_watermark {
-                return 0;
-            }
 
-            let mut num_flushed_pages = 0;
-            while num_dirty_pages > self.low_watermark {
-                let num_dirty_pages = page_cache.num_dirty_pages();
-
-            }
-            num_flushed_pages
-        }
-    */
     pub async fn flush(&self, max_pages: usize) -> usize {
         let mut dirty_pages = self.page_cache.evict_dirty_pages(max_pages);
         self.do_flush(dirty_pages).await
@@ -91,6 +77,7 @@ impl Flusher {
         let mut first_page_opt = iter.next();
         // Scan the dirty pages to group them into consecutive pages
         loop {
+            // The first one in the consecutive pages
             let first_page = match first_page_opt {
                 Some(first_page) => first_page,
                 None => {
@@ -99,6 +86,7 @@ impl Flusher {
             };
             let first_offset = first_page.offset();
 
+            // Collet the remaining consecutive pages
             let mut consecutive_pages = vec![first_page];
             let mut next_offset = first_offset + Page::size();
             loop {
@@ -139,7 +127,7 @@ impl Flusher {
             .collect();
         let page_cache = self.page_cache;
         let complete_fn = move |retval: i32| {
-            // TODO: handle the case when retval < consecutive_pages.len() * Page::size()
+            // TODO: handle partial writes or error
             assert!(retval as usize == consecutive_pages.len() * Page::size());
 
             for page in consecutive_pages {
@@ -154,6 +142,7 @@ impl Flusher {
                 page_cache.release(page);
             }
         };
+        // FIXME: should we allocate the iovec on the heap and keep it alive until the completion?
         //let io_uring = ...;
         //let handle = io_uring.writev(fd, iovec.as_ptr(), iovec.len(), offset, complete_fn);
         todo!("import io_uring_callback")
