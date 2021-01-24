@@ -87,7 +87,7 @@ mod tests {
                         waiter_queue.enqueue(&waiter);
                         loop {
                             // Start flushing when the # of dirty pages rises above the high watermark
-                            while page_cache.num_dirty_pages() > DIRTY_HIGH_MARK {
+                            while page_cache.num_dirty_pages() < DIRTY_HIGH_MARK {
                                 waiter.wait().await;
                             }
 
