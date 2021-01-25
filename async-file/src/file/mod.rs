@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::sync::Mutex;
 
 use crate::event::waiter::{Waiter, WaiterQueue};
 use crate::file::tracker::SeqRdTracker;
@@ -9,7 +10,7 @@ use crate::util::{align_down, align_up};
 
 pub use self::flusher::Flusher;
 
-use io_uring_callback::{IoUring, Fd};
+use io_uring_callback::{IoUring, Handle, Fd};
 
 mod flusher;
 mod tracker;
@@ -287,6 +288,9 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
         struct IovecsBox(Box<Vec<libc::iovec>>);
         unsafe impl Send for IovecsBox {}
         let iovecs_box = IovecsBox(iovecs);
+
+        let handle_store: Arc<Mutex<Option<Handle>>> = Arc::new(Mutex::new(None));
+        let handle_store2 = handle_store.clone();
         
         let callback = move |retval| {
             let page_cache = Rt::page_cache();
@@ -317,12 +321,14 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
             }
             self_.waiter_queue.wake_all();
             drop(iovecs_box);
+            drop(handle_store);
         };
         let io_uring = Rt::io_uring();
         let handle = unsafe {
             io_uring.readv(Fd(self.fd), iovecs_ptr, iovecs_len as u32, first_offset as i64, 0, callback)
         };
-        drop(handle);
+        let mut guard = handle_store2.lock().unwrap();
+        guard.replace(handle);
     }
 
     pub async fn write_at(self: &Arc<Self>, offset: usize, buf: &[u8]) -> i32 {
