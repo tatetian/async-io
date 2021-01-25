@@ -29,6 +29,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 #[cfg(all(use_slab, sgx))]
 use std::sync::SgxMutex as Mutex;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
 
 use io_uring::opcode::{self, types};
 #[cfg(not(use_slab))]
@@ -413,6 +416,19 @@ impl Handle {
     #[cfg(not(use_slab))]
     fn token(&self) -> sharded_slab::Entry<Token> {
         TOKEN_SLAB.get(self.token_idx).unwrap()
+    }
+}
+
+impl Unpin for Handle {}
+
+impl Future for Handle {
+    type Output = i32;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.is_completed() {
+            Poll::Ready(self.retval().unwrap())
+        } else {
+            Poll::Pending
+        }
     }
 }
 

@@ -14,6 +14,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"]  }
 intrusive-collections = "0.9"
 itertools = "0.10"
 libc = "0.2"
+io_uring_callback = { path = "../io-uring-callback" }
 
 [dev-dependencies]
 ctor = "0.1"

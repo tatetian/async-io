@@ -17,6 +17,7 @@ mod tests {
     use super::*;
     use crate::event::waiter::{Waiter, WaiterQueue};
     use lazy_static::lazy_static;
+    use io_uring_callback::{IoUring, Builder};
 
     // TODO: enable this test after integrating with io_uring 
     #[test]
@@ -65,9 +66,13 @@ mod tests {
             static ref PAGE_CACHE: PageCache = PageCache::with_capacity(PAGE_CACHE_SIZE);
             static ref FLUSHER: Flusher<Runtime> = Flusher::new();
             static ref WAITER_QUEUE: WaiterQueue = WaiterQueue::new();
+            pub static ref RING: IoUring = Builder::new().build(1024).unwrap();
         }
 
         impl AsyncFileRt for Runtime {
+            fn io_uring() -> &'static IoUring {
+                &RING
+            }
             fn page_cache() -> &'static PageCache {
                 &PAGE_CACHE
             }
@@ -109,5 +114,11 @@ mod tests {
     #[ctor::ctor]
     fn auto_init_async_rt() {
         async_rt::executor::set_parallelism(4);
+
+        let ring = &runtime::RING;
+        let actor = move || {
+            ring.trigger_callbacks();
+        };
+        async_rt::executor::register_actor(actor);
     }
 }

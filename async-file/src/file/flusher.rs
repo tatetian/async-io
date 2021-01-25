@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 
 use futures::future::{BoxFuture, FutureExt};
 use itertools::Itertools;
+use io_uring_callback::{IoUring, Fd};
 
 use crate::file::{AsyncFile, AsyncFileRt};
 use crate::page_cache::{Page, PageCache, PageHandle, PageState};
@@ -122,13 +123,20 @@ impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
         offset: usize,
         mut consecutive_pages: Vec<PageHandle>,
     ) -> BoxFuture<'static, i32> {
-        let iovec: Vec<libc::iovec> = consecutive_pages
+        let iovecs: Box<Vec<libc::iovec>> = Box::new(consecutive_pages
             .iter()
             .map(|page| libc::iovec {
                 iov_base: page.page().as_mut_ptr() as _,
                 iov_len: Page::size(),
             })
-            .collect();
+            .collect());
+        let iovecs_ptr = (*iovecs).as_ptr();
+        let iovecs_len = (*iovecs).len();
+        
+        struct IovecsBox(Box<Vec<libc::iovec>>);
+        unsafe impl Send for IovecsBox {}
+        let iovecs_box = IovecsBox(iovecs);
+
         let complete_fn = {
             let page_cache = Rt::page_cache();
             let file = {
@@ -155,11 +163,14 @@ impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
                     page_cache.release(page);
                 }
                 file.waiter_queue().wake_all();
+                drop(iovecs_box);
             }
         };
         // FIXME: should we allocate the iovec on the heap and keep it alive until the completion?
-        //let io_uring = ...;
-        //let handle = io_uring.writev(fd, iovec.as_ptr(), iovec.len(), offset, complete_fn);
-        todo!("import io_uring_callback")
+        let io_uring = Rt::io_uring();
+        let handle = unsafe {
+            io_uring.writev(Fd(fd), iovecs_ptr, iovecs_len as u32, offset as i64, 0, complete_fn)
+        };
+        Box::pin(handle)
     }
 }

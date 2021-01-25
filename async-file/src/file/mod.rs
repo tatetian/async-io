@@ -9,6 +9,8 @@ use crate::util::{align_down, align_up};
 
 pub use self::flusher::Flusher;
 
+use io_uring_callback::{IoUring, Fd};
+
 mod flusher;
 mod tracker;
 
@@ -31,7 +33,7 @@ pub struct AsyncFile<Rt: AsyncFileRt + ?Sized> {
 /// that support AsyncFile.
 pub trait AsyncFileRt: Send + Sync + 'static {
     /// Returns the io_uring instance.
-    //fn io_uring() -> &'static IoUring;
+    fn io_uring() -> &'static IoUring;
     fn page_cache() -> &'static PageCache;
     fn flusher() -> &'static Flusher<Self>;
     fn auto_flush();
@@ -273,13 +275,20 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
 
         let first_offset = consecutive_pages[0].offset();
         let self_ = self.clone();
-        let iovecs = consecutive_pages
+        let iovecs = Box::new(consecutive_pages
             .iter()
             .map(|page_handle| libc::iovec {
                 iov_base: page_handle.page().as_mut_ptr() as _,
                 iov_len: Page::size(),
             })
-            .collect::<Vec<libc::iovec>>();
+            .collect::<Vec<libc::iovec>>());
+        let iovecs_ptr = (*iovecs).as_ptr();
+        let iovecs_len = (*iovecs).len();
+
+        struct IovecsBox(Box<Vec<libc::iovec>>);
+        unsafe impl Send for IovecsBox {}
+        let iovecs_box = IovecsBox(iovecs);
+        
         let callback = move |retval| {
             let page_cache = Rt::page_cache();
             let read_nbytes = if retval >= 0 { retval } else { 0 } as usize;
@@ -308,11 +317,13 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
                 page_cache.release(page);
             }
             self_.waiter_queue.wake_all();
+            drop(iovecs_box);
         };
-        // TODO: should allocate iovec on the heap and keep it alive?
-        //let io_uring = self.io_uring();
-        //let handle = io_uring::readv(fd, first_offset, iovecs.as_mut_ptr(), iovecs.len(), callback);
-        //drop(handle);
+        let io_uring = Rt::io_uring();
+        let handle = unsafe {
+            io_uring.readv(Fd(self.fd), iovecs_ptr, iovecs_len as u32, first_offset as i64, 0, callback)
+        };
+        drop(handle);
     }
 
     pub async fn write_at(self: &Arc<Self>, offset: usize, buf: &[u8]) -> i32 {
