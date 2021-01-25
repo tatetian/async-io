@@ -21,14 +21,13 @@ mod tests {
 
     // TODO: enable this test after integrating with io_uring 
     #[test]
-    #[ignore]
     fn hello_world() {
         async_rt::task::block_on(async {
             let path = "tmp.data";
             let file = {
                 let path = path.to_string();
-                let flags = libc::O_WRONLY;
-                let mode = libc::O_CREAT | libc::O_TRUNC;
+                let flags = libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC;
+                let mode = libc::S_IRUSR | libc::S_IWUSR;
                 AsyncFile::<Runtime>::open(path.clone(), flags, mode).unwrap()
             };
             let input_buf = "hello world\n".to_string().into_bytes().into_boxed_slice();

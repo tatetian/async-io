@@ -43,7 +43,7 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
     /// Open a file at a given path.
     ///
     /// The three arguments have the same meaning as the open syscall.
-    pub fn open(mut path: String, flags: i32, mode: i32) -> Result<Arc<Self>, i32> {
+    pub fn open(mut path: String, flags: i32, mode: u32) -> Result<Arc<Self>, i32> {
         let (can_read, can_write) = if flags & libc::O_RDONLY != 0 {
             (true, false)
         } else if flags & libc::O_WRONLY != 0 {
@@ -55,7 +55,6 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
         };
 
         let fd = unsafe {
-            path.push('\0');
             let c_path = std::ffi::CString::new(path).unwrap();
             let c_path_ptr = c_path.as_bytes_with_nul().as_ptr() as _;
             libc::open(c_path_ptr, flags, mode)
@@ -482,7 +481,7 @@ impl<Rt: AsyncFileRt + ?Sized> Drop for AsyncFile<Rt> {
 
 fn errno() -> i32 {
     unsafe {
-        //*(libc::__errno_location())
-        *(libc::__error())
+        *(libc::__errno_location())
+        // *(libc::__error())
     }
 }
