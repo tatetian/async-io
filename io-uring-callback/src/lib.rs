@@ -413,6 +413,10 @@ impl Handle {
         self.token_idx as _
     }
 
+    pub fn set_waker(&self, waker: Waker) {
+        TOKEN_SLAB.lock().unwrap().get(self.token_idx).unwrap().set_waker(waker);
+    }
+
     #[cfg(not(use_slab))]
     fn token(&self) -> sharded_slab::Entry<Token> {
         TOKEN_SLAB.get(self.token_idx).unwrap()
@@ -427,6 +431,7 @@ impl Future for Handle {
         if self.is_completed() {
             Poll::Ready(self.retval().unwrap())
         } else {
+            self.set_waker(cx.waker().clone());
             Poll::Pending
         }
     }

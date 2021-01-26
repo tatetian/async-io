@@ -6,17 +6,20 @@ use std::prelude::v1::*;
 use std::sync::Mutex;
 #[cfg(sgx)]
 use std::sync::SgxMutex as Mutex;
+use std::task::Waker;
 
 pub struct Token {
     state: Atomic<State>,
     callback: Mutex<Option<Box<dyn FnOnce(i32) + Send + 'static>>>,
+    waker: Mutex<Option<Waker>>,
 }
 
 impl Token {
     pub fn new(callback: impl FnOnce(i32) + Send + 'static) -> Self {
         let state = Atomic::new(State::Submitted);
         let callback = Mutex::new(Some(Box::new(callback) as _));
-        Self { state, callback }
+        let waker = Mutex::new(None);
+        Self { state, callback, waker }
     }
 
     pub fn complete(&self, retval: i32) -> Box<dyn FnOnce(i32) + 'static> {
@@ -29,6 +32,7 @@ impl Token {
                 .compare_exchange(old_state, new_state, Ordering::Release, Ordering::Relaxed)
                 .is_ok()
             {
+                self.wake();
                 return self.take_callback();
             }
         }
@@ -54,6 +58,19 @@ impl Token {
         match self.state.load(Ordering::Acquire) {
             State::Completed(retval) => Some(retval),
             _ => None,
+        }
+    }
+
+    pub fn set_waker(&self, waker: Waker) {
+        let mut guard = self.waker.lock().unwrap();
+        debug_assert!((*guard).is_none());
+        (*guard).replace(waker);
+    }
+
+    fn wake(&self) {
+        let mut guard = self.waker.lock().unwrap();
+        if let Some(waker) = (*guard).take() {
+            waker.wake()
         }
     }
 
