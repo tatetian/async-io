@@ -58,6 +58,9 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
         let fd = unsafe {
             let c_path = std::ffi::CString::new(path).unwrap();
             let c_path_ptr = c_path.as_bytes_with_nul().as_ptr() as _;
+            let flags = if flags & libc::O_WRONLY != 0 {
+                (flags & !libc::O_WRONLY) | libc::O_RDWR
+            } else { flags };
             libc::open(c_path_ptr, flags, mode)
         };
         if fd < 0 {
