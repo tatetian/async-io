@@ -45,14 +45,12 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
     ///
     /// The three arguments have the same meaning as the open syscall.
     pub fn open(mut path: String, flags: i32, mode: u32) -> Result<Arc<Self>, i32> {
-        let (can_read, can_write) = if flags & libc::O_RDONLY != 0 {
-            (true, false)
-        } else if flags & libc::O_WRONLY != 0 {
+        let (can_read, can_write) = if flags & libc::O_WRONLY != 0 {
             (false, true)
         } else if flags & libc::O_RDWR != 0 {
             (true, true)
-        } else {
-            return Err(libc::EINVAL);
+        } else { // libc::O_RDONLY = 0
+            (true, false)
         };
 
         let fd = unsafe {
