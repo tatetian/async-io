@@ -1,5 +1,10 @@
+#[cfg(sgx)]
+use std::prelude::v1::*;
 use std::ops::RangeInclusive;
+#[cfg(not(sgx))]
 use std::sync::{Mutex, MutexGuard};
+#[cfg(sgx)]
+use std::sync::{SgxMutex as Mutex, SgxMutexGuard as MutexGuard};
 
 use itertools::Itertools;
 

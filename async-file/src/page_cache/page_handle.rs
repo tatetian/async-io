@@ -1,5 +1,10 @@
+#[cfg(sgx)]
+use std::prelude::v1::*;
 use std::any::Any;
+#[cfg(not(sgx))]
 use std::sync::{Arc, MutexGuard};
+#[cfg(sgx)]
+use std::sync::{Arc, SgxMutexGuard as MutexGuard};
 
 use crate::page_cache::{AsFd, Page, PageEntry, PageState};
 

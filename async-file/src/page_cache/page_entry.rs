@@ -1,5 +1,10 @@
+#[cfg(sgx)]
+use std::prelude::v1::*;
 use std::any::Any;
+#[cfg(not(sgx))]
 use std::sync::{Arc, Mutex, MutexGuard};
+#[cfg(sgx)]
+use std::sync::{Arc, SgxMutex as Mutex, SgxMutexGuard as MutexGuard};
 
 use atomic::{Atomic, Ordering};
 

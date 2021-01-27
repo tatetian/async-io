@@ -1,3 +1,5 @@
+#[cfg(sgx)]
+use std::prelude::v1::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The unique id of an object.

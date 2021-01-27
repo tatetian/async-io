@@ -20,7 +20,7 @@ mod locals;
 mod task;
 
 pub fn spawn<T: Send + 'static>(future: impl Future<Output = T> + 'static + Send) -> JoinHandle<T> {
-    #[cfg(any(test, feature = "auto_run"))]
+    #[cfg(all(any(test, feature = "auto_run"), not(sgx)))]
     init_runner_threads();
 
     let (join_handle, output_handle) = join::new();
@@ -34,7 +34,7 @@ pub fn spawn<T: Send + 'static>(future: impl Future<Output = T> + 'static + Send
 }
 
 pub fn block_on<T: Send + 'static>(future: impl Future<Output = T> + 'static + Send) -> T {
-    #[cfg(any(test, feature = "auto_run"))]
+    #[cfg(all(any(test, feature = "auto_run"), not(sgx)))]
     init_runner_threads();
 
     let output_slot: Arc<Mutex<Option<T>>> = Arc::new(Mutex::new(None));
@@ -61,7 +61,7 @@ pub fn block_on<T: Send + 'static>(future: impl Future<Output = T> + 'static + S
     output_slot.take().unwrap()
 }
 
-#[cfg(any(test, feature = "auto_run"))]
+#[cfg(all(any(test, feature = "auto_run"), not(sgx)))]
 fn init_runner_threads() {
     use std::sync::Once;
     static INIT: Once = Once::new();

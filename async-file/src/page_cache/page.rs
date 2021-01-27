@@ -1,3 +1,5 @@
+#[cfg(sgx)]
+use std::prelude::v1::*;
 use std::cell::UnsafeCell;
 
 pub struct Page {

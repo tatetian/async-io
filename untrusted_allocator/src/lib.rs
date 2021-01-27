@@ -136,3 +136,5 @@ impl Drop for UntrustedAllocator {
             .dealloc(NonNull::new(self.buf_ptr).unwrap(), layout);
     }
 }
+
+unsafe impl Send for UntrustedAllocator {}

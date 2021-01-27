@@ -1,6 +1,12 @@
+#[cfg(sgx)]
+use std::prelude::v1::*;
 use std::future::Future;
 use std::marker::PhantomData;
 
+#[cfg(sgx)]
+use sgx_trts::libc;
+#[cfg(sgx)]
+use untrusted_allocator::UntrustedAllocator;
 use futures::future::{BoxFuture, FutureExt};
 use itertools::Itertools;
 use io_uring_callback::{IoUring, Fd};
@@ -130,8 +136,33 @@ impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
                 iov_len: Page::size(),
             })
             .collect());
-        let iovecs_ptr = (*iovecs).as_ptr();
-        let iovecs_len = (*iovecs).len();
+        #[cfg(not(sgx))]
+        let (iovecs_ptr, iovecs_len) = ((*iovecs).as_ptr(), (*iovecs).len());
+        #[cfg(sgx)]
+        let (iovecs_ptr, iovecs_len, allocator) = {
+            let iovecs_len = (*iovecs).len();
+            let t_iovecs_ptr = (*iovecs).as_ptr();
+            let iovecs_size = iovecs_len * core::mem::size_of::<libc::iovec>();
+            let size = iovecs_size + iovecs_len * Page::size();
+            let allocator = UntrustedAllocator::new(size, 8).unwrap();
+            let iovecs_ptr = allocator.as_mut_ptr() as *mut libc::iovec;
+            let data_ptr = unsafe { iovecs_ptr.add(iovecs_size) as *mut u8 };
+            for idx in 0..iovecs_len {
+                unsafe {
+                    *iovecs_ptr.add(idx) = libc::iovec {
+                        iov_base: data_ptr.add(idx * Page::size()) as _,
+                        iov_len: Page::size(),
+                    };
+                    assert!((*t_iovecs_ptr.add(idx)).iov_len == Page::size());
+                    std::ptr::copy_nonoverlapping(
+                        (*t_iovecs_ptr.add(idx)).iov_base,
+                        (*iovecs_ptr.add(idx)).iov_base,
+                        (*t_iovecs_ptr.add(idx)).iov_len,
+                    );
+                }
+            }
+            (iovecs_ptr, iovecs_len, allocator)
+        };
         
         struct IovecsBox(Box<Vec<libc::iovec>>);
         unsafe impl Send for IovecsBox {}
@@ -163,6 +194,8 @@ impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
                     page_cache.release(page);
                 }
                 file.waiter_queue().wake_all();
+                #[cfg(sgx)]
+                drop(allocator);
                 drop(iovecs_box);
             }
         };

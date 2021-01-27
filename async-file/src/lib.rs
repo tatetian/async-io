@@ -1,13 +1,30 @@
+#![cfg_attr(sgx, no_std)]
 #![feature(get_mut_unchecked)]
 #![feature(option_unwrap_none)]
 #![feature(drain_filter)]
 #![feature(slice_fill)]
+
+#[cfg(sgx)]
+extern crate sgx_types;
+#[cfg(sgx)]
+#[macro_use]
+extern crate sgx_tstd as std;
+#[cfg(sgx)]
+extern crate sgx_trts;
+#[cfg(sgx)]
+extern crate untrusted_allocator;
+
+#[cfg(sgx)]
+use sgx_trts::libc;
+#[cfg(sgx)]
+use std::prelude::v1::*;
 
 mod event;
 mod file;
 mod page_cache;
 mod util;
 
+pub use crate::event::waiter::{Waiter, WaiterQueue};
 pub use crate::file::{AsyncFile, AsyncFileRt, Flusher};
 pub use crate::page_cache::{AsFd, Page, PageCache, PageHandle, PageState};
 

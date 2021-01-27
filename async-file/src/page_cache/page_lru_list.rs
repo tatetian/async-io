@@ -1,3 +1,5 @@
+#[cfg(sgx)]
+use std::prelude::v1::*;
 use std::sync::Arc;
 
 use crate::page_cache::{PageEntry, PageEntryInner};

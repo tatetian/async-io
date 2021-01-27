@@ -7,4 +7,7 @@ members = [
     "io-uring",
     "slab",
     "sharded-slab",
+    "flume",
 ]
+
+exclude = [ "sgx", "incubator-teaclave-sgx-sdk", "untrusted_allocator" ]
