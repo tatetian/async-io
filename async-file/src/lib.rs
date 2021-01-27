@@ -42,7 +42,9 @@ mod tests {
                 let mode = 0;
                 AsyncFile::<Runtime>::open(path.clone(), flags, mode).unwrap()
             };
-            let mut output_buf = Vec::with_capacity(input_buf.len()).into_boxed_slice();
+            let mut output_vec = Vec::with_capacity(input_buf.len());
+            output_vec.resize(input_buf.len(), 0);
+            let mut output_buf = output_vec.into_boxed_slice();
             let retval = file.read_at(0, &mut output_buf[..]).await;
             assert!(retval as usize == input_buf.len());
             assert!(output_buf.len() == input_buf.len());

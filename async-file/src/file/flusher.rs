@@ -166,7 +166,6 @@ impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
                 drop(iovecs_box);
             }
         };
-        // FIXME: should we allocate the iovec on the heap and keep it alive until the completion?
         let io_uring = Rt::io_uring();
         let handle = unsafe {
             io_uring.writev(Fd(fd), iovecs_ptr, iovecs_len as u32, offset as i64, 0, complete_fn)
