@@ -83,6 +83,12 @@ impl<'a> Submitter<'a> {
         flag: u32,
         sig: Option<&libc::sigset_t>,
     ) -> io::Result<usize> {
+        use std::sync::Once;
+        static START: Once = Once::new();
+        START.call_once(|| {
+            sys::start_enter_syscall_thread(self.fd.as_raw_fd());
+        });
+        
         if flag & sys::IORING_ENTER_SQ_WAKEUP == 0 {
             return Ok(0);
         }
