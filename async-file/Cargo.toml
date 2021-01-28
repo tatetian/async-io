@@ -8,12 +8,24 @@ edition = "2018"
 
 [dependencies]
 array-init = "1.0"
-async-rt = { path = "../async-rt", features = ["auto_run"] }
 atomic = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"]  }
 intrusive-collections = "0.9"
-itertools = "0.10"
+itertools = { version = "0.10", default-features = false, features = ["use_alloc"] }
+io_uring_callback = { path = "../io-uring-callback" }
+
+[target.'cfg(not(sgx))'.dependencies]
+async-rt = { path = "../async-rt", features = ["auto_run"] }
 libc = "0.2"
+
+# features from different targets will be unified.
+# hence, async-rt is featured "auto_run" when cfg sgx.
+[target.'cfg(sgx)'.dependencies]
+async-rt = { path = "../async-rt" }
+sgx_types = { path = "../incubator-teaclave-sgx-sdk/sgx_types" }
+sgx_tstd = { path = "../incubator-teaclave-sgx-sdk/sgx_tstd", features = ["backtrace"] }
+sgx_trts = { path = "../incubator-teaclave-sgx-sdk/sgx_trts" }
+untrusted_allocator = { path = "../untrusted_allocator" }
 
 [dev-dependencies]
 ctor = "0.1"

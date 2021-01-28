@@ -1,0 +1,24 @@
+[package]
+name = "Helloworldsampleenclave"
+version = "1.0.0"
+authors = ["The Teaclave Authors"]
+edition = "2018"
+
+[lib]
+name = "helloworldsampleenclave"
+crate-type = ["staticlib"]
+
+[features]
+default = []
+
+[target.'cfg(not(target_env = "sgx"))'.dependencies]
+sgx_types = { path = "../../incubator-teaclave-sgx-sdk/sgx_types" }
+sgx_tstd = { path = "../../incubator-teaclave-sgx-sdk/sgx_tstd", features = ["backtrace", "thread"] }
+sgx_trts = { path = "../../incubator-teaclave-sgx-sdk/sgx_trts" }
+
+[target.'cfg(sgx)'.dependencies]
+futures = { version = "0.3", default-features = false }
+async-file = { path = "../../async-file" }
+async-rt = { path = "../../async-rt" } 
+io_uring_callback = { path = "../../io-uring-callback" }
+lazy_static = { version = "1.4.0", features = ["spin_no_std"] }

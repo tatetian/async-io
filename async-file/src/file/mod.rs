@@ -1,6 +1,10 @@
+#[cfg(sgx)]
+use std::prelude::v1::*;
 use std::marker::PhantomData;
-use std::sync::Arc;
-use std::sync::RwLock;
+#[cfg(not(sgx))]
+use std::sync::{Arc, RwLock, Mutex};
+#[cfg(sgx)]
+use std::sync::{Arc, SgxRwLock as RwLock, SgxMutex as Mutex};
 
 use crate::event::waiter::{Waiter, WaiterQueue};
 use crate::file::tracker::SeqRdTracker;
@@ -8,6 +12,12 @@ use crate::page_cache::{AsFd, Page, PageCache, PageHandle, PageState};
 use crate::util::{align_down, align_up};
 
 pub use self::flusher::Flusher;
+
+#[cfg(sgx)]
+use sgx_trts::libc;
+#[cfg(sgx)]
+use untrusted_allocator::UntrustedAllocator;
+use io_uring_callback::{IoUring, Handle, Fd};
 
 mod flusher;
 mod tracker;
@@ -31,7 +41,7 @@ pub struct AsyncFile<Rt: AsyncFileRt + ?Sized> {
 /// that support AsyncFile.
 pub trait AsyncFileRt: Send + Sync + 'static {
     /// Returns the io_uring instance.
-    //fn io_uring() -> &'static IoUring;
+    fn io_uring() -> &'static IoUring;
     fn page_cache() -> &'static PageCache;
     fn flusher() -> &'static Flusher<Self>;
     fn auto_flush();
@@ -41,28 +51,35 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
     /// Open a file at a given path.
     ///
     /// The three arguments have the same meaning as the open syscall.
-    pub fn open(mut path: String, flags: i32, mode: i32) -> Result<Arc<Self>, i32> {
-        let (can_read, can_write) = if flags & libc::O_RDONLY != 0 {
-            (true, false)
-        } else if flags & libc::O_WRONLY != 0 {
+    pub fn open(mut path: String, flags: i32, mode: u32) -> Result<Arc<Self>, i32> {
+        let (can_read, can_write) = if flags & libc::O_WRONLY != 0 {
             (false, true)
         } else if flags & libc::O_RDWR != 0 {
             (true, true)
-        } else {
-            return Err(libc::EINVAL);
+        } else { // libc::O_RDONLY = 0
+            (true, false)
         };
 
         let fd = unsafe {
-            path.push('\0');
             let c_path = std::ffi::CString::new(path).unwrap();
             let c_path_ptr = c_path.as_bytes_with_nul().as_ptr() as _;
-            libc::open(c_path_ptr, flags, mode)
+            let flags = if flags & libc::O_WRONLY != 0 {
+                (flags & !libc::O_WRONLY) | libc::O_RDWR
+            } else { flags };
+            #[cfg(not(sgx))]
+            let fd = libc::open(c_path_ptr, flags, mode);
+            #[cfg(sgx)]
+            let fd = libc::ocall::open64(c_path_ptr, flags, mode as i32);
+            fd
         };
         if fd < 0 {
             return Err(errno());
         }
 
+        #[cfg(not(sgx))]
         let len = unsafe { libc::lseek(fd, 0, libc::SEEK_END) };
+        #[cfg(sgx)]
+        let len = unsafe { libc::ocall::lseek(fd, 0, libc::SEEK_END) };
         if len < 0 {
             return Err(errno());
         }
@@ -273,13 +290,42 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
 
         let first_offset = consecutive_pages[0].offset();
         let self_ = self.clone();
-        let iovecs = consecutive_pages
+        let iovecs = Box::new(consecutive_pages
             .iter()
             .map(|page_handle| libc::iovec {
                 iov_base: page_handle.page().as_mut_ptr() as _,
                 iov_len: Page::size(),
             })
-            .collect::<Vec<libc::iovec>>();
+            .collect::<Vec<libc::iovec>>());
+        #[cfg(not(sgx))]
+        let (iovecs_ptr, iovecs_len) = ((*iovecs).as_ptr(), (*iovecs).len());
+        #[cfg(sgx)]
+        let (iovecs_ptr, iovecs_len, allocator, iovecs_ptr_u64, t_iovecs_ptr_u64) = {
+            let iovecs_len = (*iovecs).len();
+            let t_iovecs_ptr = (*iovecs).as_ptr();
+            let iovecs_size = iovecs_len * core::mem::size_of::<libc::iovec>();
+            let size = iovecs_size + iovecs_len * Page::size();
+            let allocator = UntrustedAllocator::new(size, 8).unwrap();
+            let iovecs_ptr = allocator.as_mut_ptr() as *mut libc::iovec;
+            let data_ptr = unsafe { iovecs_ptr.add(iovecs_size) as *mut u8 };
+            for idx in 0..iovecs_len {
+                unsafe {
+                    *iovecs_ptr.add(idx) = libc::iovec {
+                        iov_base: data_ptr.add(idx * Page::size()) as _,
+                        iov_len: Page::size(),
+                    };
+                }
+            }
+            (iovecs_ptr, iovecs_len, allocator, iovecs_ptr as u64, t_iovecs_ptr as u64)
+        };
+
+        struct IovecsBox(Box<Vec<libc::iovec>>);
+        unsafe impl Send for IovecsBox {}
+        let iovecs_box = IovecsBox(iovecs);
+
+        let handle_store: Arc<Mutex<Option<Handle>>> = Arc::new(Mutex::new(None));
+        let handle_store2 = handle_store.clone();
+        
         let callback = move |retval| {
             let page_cache = Rt::page_cache();
             let read_nbytes = if retval >= 0 { retval } else { 0 } as usize;
@@ -308,11 +354,32 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
                 page_cache.release(page);
             }
             self_.waiter_queue.wake_all();
+            
+            #[cfg(sgx)]
+            {
+                let iovecs_ptr = iovecs_ptr_u64 as *const libc::iovec;
+                let t_iovecs_ptr = t_iovecs_ptr_u64 as *mut libc::iovec;
+                for idx in 0..iovecs_len {
+                    unsafe {
+                        assert!((*t_iovecs_ptr.add(idx)).iov_len == Page::size());
+                        std::ptr::copy_nonoverlapping(
+                            (*iovecs_ptr.add(idx)).iov_base,
+                            (*t_iovecs_ptr.add(idx)).iov_base,
+                            (*t_iovecs_ptr.add(idx)).iov_len,
+                        );
+                    }
+                }
+                drop(allocator);
+            }
+            drop(iovecs_box);
+            drop(handle_store);
         };
-        // TODO: should allocate iovec on the heap and keep it alive?
-        //let io_uring = self.io_uring();
-        //let handle = io_uring::readv(fd, first_offset, iovecs.as_mut_ptr(), iovecs.len(), callback);
-        //drop(handle);
+        let io_uring = Rt::io_uring();
+        let handle = unsafe {
+            io_uring.readv(Fd(self.fd), iovecs_ptr, iovecs_len as u32, first_offset as i64, 0, callback)
+        };
+        let mut guard = handle_store2.lock().unwrap();
+        guard.replace(handle);
     }
 
     pub async fn write_at(self: &Arc<Self>, offset: usize, buf: &[u8]) -> i32 {
@@ -464,14 +531,25 @@ impl<Rt: AsyncFileRt + ?Sized> AsFd for AsyncFile<Rt> {
 impl<Rt: AsyncFileRt + ?Sized> Drop for AsyncFile<Rt> {
     fn drop(&mut self) {
         unsafe {
+            #[cfg(not(sgx))]
             libc::close(self.fd);
+            #[cfg(sgx)]
+            libc::ocall::close(self.fd);
         }
     }
 }
 
+#[cfg(not(sgx))]
 fn errno() -> i32 {
     unsafe {
-        //*(libc::__errno_location())
-        *(libc::__error())
+        *(libc::__errno_location())
+        // *(libc::__error())
+    }
+}
+
+#[cfg(sgx)]
+fn errno() -> i32 {
+    unsafe {
+        libc::errno()
     }
 }

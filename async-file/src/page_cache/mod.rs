@@ -1,8 +1,13 @@
+#[cfg(sgx)]
+use std::prelude::v1::*;
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(not(sgx))]
 use std::sync::{Arc, Mutex, MutexGuard};
+#[cfg(sgx)]
+use std::sync::{Arc, SgxMutex as Mutex, SgxMutexGuard as MutexGuard};
 
 mod page;
 mod page_entry;
@@ -290,7 +295,6 @@ impl PageCache {
 
 impl std::fmt::Debug for PageCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::sync::MutexGuard;
         f.debug_struct("PageCache")
             .field("capacity", &self.capacity)
             .field("num_allocated", &self.num_allocated.load(Ordering::Relaxed))

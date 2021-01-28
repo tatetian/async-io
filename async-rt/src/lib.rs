@@ -1,4 +1,4 @@
-#![cfg_attr(not(any(test, feature = "auto_run")), no_std)]
+#![cfg_attr(any(not(any(test, feature = "auto_run")), sgx), no_std)]
 #![feature(const_fn)]
 #![feature(thread_local)]
 

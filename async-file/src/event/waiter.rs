@@ -1,5 +1,10 @@
+#[cfg(sgx)]
+use std::prelude::v1::*;
 use std::sync::atomic::AtomicUsize;
+#[cfg(not(sgx))]
 use std::sync::{Arc, Mutex};
+#[cfg(sgx)]
+use std::sync::{Arc, SgxMutex as Mutex};
 
 use atomic::{Atomic, Ordering};
 use intrusive_collections::intrusive_adapter;

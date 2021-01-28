@@ -1,3 +1,5 @@
+#[cfg(sgx)]
+use std::prelude::v1::*;
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::atomic::AtomicU32;
