@@ -489,8 +489,6 @@ impl Builder {
     #[inline]
     pub fn build(&self, entries: u32) -> io::Result<IoUring> {
         let io_uring_inner = self.inner.build(entries)?;
-        #[cfg(any(sgx, use_enter_thread))]
-        io_uring_inner.start_enter_syscall_thread();
         let io_uring = IoUring::new(io_uring_inner);
         Ok(io_uring)
     }

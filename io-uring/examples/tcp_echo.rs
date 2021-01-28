@@ -53,8 +53,6 @@ impl AcceptCount {
 
 fn main() -> anyhow::Result<()> {
     let mut ring = IoUring::new(256)?;
-    #[cfg(use_enter_thread)]
-    ring.start_enter_syscall_thread();
     let listener = TcpListener::bind(("127.0.0.1", 3456))?;
 
     let mut backlog = Vec::new();
