@@ -9,6 +9,7 @@ use crate::util::{align_down, align_up};
 
 pub use self::flusher::Flusher;
 
+mod types;
 mod flusher;
 mod tracker;
 
