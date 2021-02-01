@@ -32,6 +32,7 @@ use sgx_types::*;
 
 mod runtime;
 mod hello_world;
+mod bench;
 
 #[no_mangle]
 pub extern "C" fn run_io_uring_example() -> sgx_status_t {
@@ -41,6 +42,7 @@ pub extern "C" fn run_io_uring_example() -> sgx_status_t {
 
     runtime::init_runtime();
     runtime::run_blocking(hello_world::test());
+    runtime::run_blocking(bench::test());
 
     sgx_status_t::SGX_SUCCESS
 }

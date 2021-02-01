@@ -23,12 +23,12 @@ pub fn run_blocking<T: Send + 'static>(
     TEST_RT.run_blocking(future)
 }
 
-const TEST_PARALLELISM: u32 = 4;
+const TEST_PARALLELISM: u32 = 1;
 
-const PAGE_CACHE_SIZE: usize = 16;
-const DIRTY_LOW_MARK: usize = 4;
-const DIRTY_HIGH_MARK: usize = 8;
-const MAX_DIRTY_PAGES_PER_FLUSH: usize = 12;
+pub const PAGE_CACHE_SIZE: usize = 102400 * 2; // 800 MB
+pub const DIRTY_LOW_MARK: usize = PAGE_CACHE_SIZE / 10 * 3;
+pub const DIRTY_HIGH_MARK: usize = PAGE_CACHE_SIZE / 10 * 7;
+pub const MAX_DIRTY_PAGES_PER_FLUSH: usize = PAGE_CACHE_SIZE / 10;
 
 lazy_static! {
     static ref TEST_RT: TestRt = TestRt::new(TEST_PARALLELISM);

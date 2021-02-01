@@ -30,3 +30,4 @@ untrusted_allocator = { path = "../untrusted_allocator" }
 [dev-dependencies]
 ctor = "0.1"
 lazy_static = "1.4"
+rand = "0.8.3"
