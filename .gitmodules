@@ -1,3 +1,8 @@
-[submodule "incubator-teaclave-sgx-sdk"]
-	path = incubator-teaclave-sgx-sdk
-	url = https://github.com/apache/incubator-teaclave-sgx-sdk.git
+[submodule "third_parties/io-uring"]
+	path = third_parties/io-uring
+	url = https://github.com/ShuochengWang/io-uring.git
+	branch = sgx
+[submodule "third_parties/flume"]
+	path = third_parties/flume
+	url = https://github.com/ShuochengWang/flume.git
+	branch = sgx
