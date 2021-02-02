@@ -1,9 +1,9 @@
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::prelude::v1::*;
 use std::any::Any;
-#[cfg(not(sgx))]
+#[cfg(not(feature = "sgx"))]
 use std::sync::{Arc, MutexGuard};
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::sync::{Arc, SgxMutexGuard as MutexGuard};
 
 use crate::page_cache::{AsFd, Page, PageEntry, PageState};

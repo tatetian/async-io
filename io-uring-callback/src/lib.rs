@@ -1,42 +1,36 @@
 //! An IoUring with callback-based async I/O APIs.
-#![cfg_attr(sgx, no_std)]
+#![cfg_attr(feature = "sgx", no_std)]
 
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 extern crate sgx_types;
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 #[macro_use]
 extern crate sgx_tstd as std;
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 extern crate sgx_trts;
+#[cfg(feature = "sgx")]
+extern crate sgx_libc as libc;
 
 extern crate atomic;
 extern crate io_uring;
 #[macro_use]
 extern crate lazy_static;
-#[cfg(not(use_slab))]
-extern crate sharded_slab;
-#[cfg(use_slab)]
 extern crate slab;
 
-#[cfg(sgx)]
-pub use sgx_trts::libc;
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::prelude::v1::*;
 
 use std::io;
 use std::sync::Arc;
-#[cfg(all(use_slab, not(sgx)))]
+#[cfg(not(feature = "sgx"))]
 use std::sync::Mutex;
-#[cfg(all(use_slab, sgx))]
+#[cfg(feature = "sgx")]
 use std::sync::SgxMutex as Mutex;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
 use io_uring::opcode::{self, types};
-#[cfg(not(use_slab))]
-use sharded_slab::Slab;
-#[cfg(use_slab)]
 use slab::Slab;
 
 use crate::operation::Token;
@@ -45,12 +39,6 @@ mod operation;
 
 pub use io_uring::opcode::types::{Fd, Fixed};
 
-#[cfg(not(use_slab))]
-lazy_static! {
-    static ref TOKEN_SLAB: Slab<Token> = Slab::new();
-}
-
-#[cfg(use_slab)]
 lazy_static! {
     static ref TOKEN_SLAB: Mutex<Slab<Token>> = Mutex::new(Slab::new());
 }
@@ -322,19 +310,6 @@ impl IoUring {
     }
 
     /// Scan for completed async I/O and trigger their registered callbacks.
-    #[cfg(not(use_slab))]
-    pub fn trigger_callbacks(&self) {
-        let cq = self.inner.completion();
-        while let Some(cqe) = cq.pop() {
-            let retval = cqe.result();
-            let token_idx = cqe.user_data() as usize;
-            let token = TOKEN_SLAB.get(token_idx).unwrap();
-            let callback = token.complete(retval);
-            (callback)(retval);
-        }
-    }
-
-    #[cfg(use_slab)]
     pub fn trigger_callbacks(&self) {
         let cq = self.inner.completion();
         while let Some(cqe) = cq.pop() {
@@ -353,14 +328,6 @@ impl IoUring {
         todo!();
     }
 
-    #[cfg(not(use_slab))]
-    fn gen_token(&self, callback: impl FnOnce(i32) + Send + 'static) -> usize {
-        let token = Token::new(callback);
-        let token_idx = TOKEN_SLAB.insert(token).unwrap();
-        token_idx
-    }
-
-    #[cfg(use_slab)]
     fn gen_token(&self, callback: impl FnOnce(i32) + Send + 'static) -> usize {
         let token = Token::new(callback);
         let token_idx = TOKEN_SLAB.lock().unwrap().insert(token);
@@ -381,22 +348,10 @@ pub struct Handle {
 }
 
 impl Handle {
-    #[cfg(not(use_slab))]
-    pub fn retval(&self) -> Option<i32> {
-        self.token().retval()
-    }
-
-    #[cfg(use_slab)]
     pub fn retval(&self) -> Option<i32> {
         TOKEN_SLAB.lock().unwrap().get(self.token_idx).unwrap().retval()
     }
 
-    #[cfg(not(use_slab))]
-    pub fn is_completed(&self) -> bool {
-        self.token().is_completed()
-    }
-
-    #[cfg(use_slab)]
     pub fn is_completed(&self) -> bool {
         TOKEN_SLAB.lock().unwrap().get(self.token_idx).unwrap().is_completed()
     }
@@ -416,11 +371,6 @@ impl Handle {
     pub fn set_waker(&self, waker: Waker) {
         TOKEN_SLAB.lock().unwrap().get(self.token_idx).unwrap().set_waker(waker);
     }
-
-    #[cfg(not(use_slab))]
-    fn token(&self) -> sharded_slab::Entry<Token> {
-        TOKEN_SLAB.get(self.token_idx).unwrap()
-    }
 }
 
 impl Unpin for Handle {}
@@ -438,13 +388,6 @@ impl Future for Handle {
 }
 
 impl Drop for Handle {
-    #[cfg(not(use_slab))]
-    fn drop(&mut self) {
-        let has_removed = TOKEN_SLAB.remove(self.token_idx);
-        debug_assert!(has_removed);
-    }
-
-    #[cfg(use_slab)]
     fn drop(&mut self) {
         let mut token_slab = TOKEN_SLAB.lock().unwrap();
         debug_assert!(token_slab.contains(self.token_idx));

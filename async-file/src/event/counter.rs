@@ -1,12 +1,12 @@
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::prelude::v1::*;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(not(sgx))]
+#[cfg(not(feature = "sgx"))]
 use std::sync::Mutex;
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::sync::SgxMutex as Mutex;
 use std::task::{Context, Poll, Waker};
 
