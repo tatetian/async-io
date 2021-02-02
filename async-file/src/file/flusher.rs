@@ -1,12 +1,12 @@
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::prelude::v1::*;
 use std::future::Future;
 use std::marker::PhantomData;
 
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use sgx_trts::libc;
-#[cfg(sgx)]
-use untrusted_allocator::UntrustedAllocator;
+#[cfg(feature = "sgx")]
+use sgx_untrusted_alloc::UntrustedAllocator;
 use futures::future::{BoxFuture, FutureExt};
 use itertools::Itertools;
 use io_uring_callback::{IoUring, Fd};
@@ -136,9 +136,9 @@ impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
                 iov_len: Page::size(),
             })
             .collect());
-        #[cfg(not(sgx))]
+        #[cfg(not(feature = "sgx"))]
         let (iovecs_ptr, iovecs_len) = ((*iovecs).as_ptr(), (*iovecs).len());
-        #[cfg(sgx)]
+        #[cfg(feature = "sgx")]
         let (iovecs_ptr, iovecs_len, allocator) = {
             let iovecs_len = (*iovecs).len();
             let t_iovecs_ptr = (*iovecs).as_ptr();
@@ -194,7 +194,7 @@ impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
                     page_cache.release(page);
                 }
                 file.waiter_queue().wake_all();
-                #[cfg(sgx)]
+                #[cfg(feature = "sgx")]
                 drop(allocator);
                 drop(iovecs_box);
             }

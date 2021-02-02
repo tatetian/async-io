@@ -1,9 +1,9 @@
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::prelude::v1::*;
 use std::marker::PhantomData;
-#[cfg(not(sgx))]
+#[cfg(not(feature = "sgx"))]
 use std::sync::{Arc, RwLock, Mutex};
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::sync::{Arc, SgxRwLock as RwLock, SgxMutex as Mutex};
 
 use crate::event::waiter::{Waiter, WaiterQueue};
@@ -13,10 +13,10 @@ use crate::util::{align_down, align_up};
 
 pub use self::flusher::Flusher;
 
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use sgx_trts::libc;
-#[cfg(sgx)]
-use untrusted_allocator::UntrustedAllocator;
+#[cfg(feature = "sgx")]
+use sgx_untrusted_alloc::UntrustedAllocator;
 use io_uring_callback::{IoUring, Handle, Fd};
 
 mod flusher;
@@ -66,9 +66,9 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
             let flags = if flags & libc::O_WRONLY != 0 {
                 (flags & !libc::O_WRONLY) | libc::O_RDWR
             } else { flags };
-            #[cfg(not(sgx))]
+            #[cfg(not(feature = "sgx"))]
             let fd = libc::open(c_path_ptr, flags, mode);
-            #[cfg(sgx)]
+            #[cfg(feature = "sgx")]
             let fd = libc::ocall::open64(c_path_ptr, flags, mode as i32);
             fd
         };
@@ -76,9 +76,9 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
             return Err(errno());
         }
 
-        #[cfg(not(sgx))]
+        #[cfg(not(feature = "sgx"))]
         let len = unsafe { libc::lseek(fd, 0, libc::SEEK_END) };
-        #[cfg(sgx)]
+        #[cfg(feature = "sgx")]
         let len = unsafe { libc::ocall::lseek(fd, 0, libc::SEEK_END) };
         if len < 0 {
             return Err(errno());
@@ -297,9 +297,9 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
                 iov_len: Page::size(),
             })
             .collect::<Vec<libc::iovec>>());
-        #[cfg(not(sgx))]
+        #[cfg(not(feature = "sgx"))]
         let (iovecs_ptr, iovecs_len) = ((*iovecs).as_ptr(), (*iovecs).len());
-        #[cfg(sgx)]
+        #[cfg(feature = "sgx")]
         let (iovecs_ptr, iovecs_len, allocator, iovecs_ptr_u64, t_iovecs_ptr_u64) = {
             let iovecs_len = (*iovecs).len();
             let t_iovecs_ptr = (*iovecs).as_ptr();
@@ -355,7 +355,7 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
             }
             self_.waiter_queue.wake_all();
             
-            #[cfg(sgx)]
+            #[cfg(feature = "sgx")]
             {
                 let iovecs_ptr = iovecs_ptr_u64 as *const libc::iovec;
                 let t_iovecs_ptr = t_iovecs_ptr_u64 as *mut libc::iovec;
@@ -531,15 +531,15 @@ impl<Rt: AsyncFileRt + ?Sized> AsFd for AsyncFile<Rt> {
 impl<Rt: AsyncFileRt + ?Sized> Drop for AsyncFile<Rt> {
     fn drop(&mut self) {
         unsafe {
-            #[cfg(not(sgx))]
+            #[cfg(not(feature = "sgx"))]
             libc::close(self.fd);
-            #[cfg(sgx)]
+            #[cfg(feature = "sgx")]
             libc::ocall::close(self.fd);
         }
     }
 }
 
-#[cfg(not(sgx))]
+#[cfg(not(feature = "sgx"))]
 fn errno() -> i32 {
     unsafe {
         *(libc::__errno_location())
@@ -547,7 +547,7 @@ fn errno() -> i32 {
     }
 }
 
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 fn errno() -> i32 {
     unsafe {
         libc::errno()

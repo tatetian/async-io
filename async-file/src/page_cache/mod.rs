@@ -1,12 +1,12 @@
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::prelude::v1::*;
 use std::any::Any;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(not(sgx))]
+#[cfg(not(feature = "sgx"))]
 use std::sync::{Arc, Mutex, MutexGuard};
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::sync::{Arc, SgxMutex as Mutex, SgxMutexGuard as MutexGuard};
 
 mod page;

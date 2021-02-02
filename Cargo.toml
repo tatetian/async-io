@@ -4,10 +4,10 @@ members = [
     "async-file",
     "async-rt",
     "io-uring-callback",
-    "io-uring",
-    "slab",
-    "sharded-slab",
-    "flume",
+    "sgx-untrusted-alloc",
 ]
 
-exclude = [ "sgx", "incubator-teaclave-sgx-sdk", "untrusted_allocator" ]
+exclude = [ 
+    "third_parties", 
+    "test",
+]

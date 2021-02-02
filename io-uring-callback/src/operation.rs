@@ -1,12 +1,13 @@
 //! Types that describe Async I/O operations.
-use atomic::{Atomic, Ordering};
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::prelude::v1::*;
-#[cfg(not(sgx))]
+#[cfg(not(feature = "sgx"))]
 use std::sync::Mutex;
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::sync::SgxMutex as Mutex;
 use std::task::Waker;
+
+use atomic::{Atomic, Ordering};
 
 pub struct Token {
     state: Atomic<State>,

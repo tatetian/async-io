@@ -1,7 +1,10 @@
-#![cfg_attr(any(not(any(test, feature = "auto_run")), sgx), no_std)]
+#![cfg_attr(any(not(any(test, feature = "auto_run")), feature = "sgx"), no_std)]
 #![feature(const_fn)]
 #![feature(thread_local)]
 
+#[cfg(all(feature = "sgx", feature = "auto_run"))]
+#[macro_use]
+extern crate sgx_tstd as std;
 extern crate alloc;
 extern crate bit_vec;
 #[macro_use]
@@ -111,7 +114,8 @@ mod tests {
 
         #[ctor::ctor]
         fn auto_init() {
-            log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info))
+            log::set_logger(&LOGGER)
+                .map(|()| log::set_max_level(LevelFilter::Info))
                 .expect("failed to init the");
         }
 

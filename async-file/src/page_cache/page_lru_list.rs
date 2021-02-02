@@ -1,4 +1,4 @@
-#[cfg(sgx)]
+#[cfg(feature = "sgx")]
 use std::prelude::v1::*;
 use std::sync::Arc;
 
