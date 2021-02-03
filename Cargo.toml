@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "async-socket",
     "async-file",
     "async-rt",
     "io-uring-callback",
