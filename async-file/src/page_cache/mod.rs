@@ -1,8 +1,6 @@
+use std::collections::HashMap;
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
-use std::any::Any;
-use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(feature = "sgx"))]
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -171,7 +169,7 @@ impl PageCache {
     }
 
     pub fn num_dirty_pages(&self) -> usize {
-        let mut lru_dirty_list = self.acquire_lru_list(LruListName::Dirty);
+        let lru_dirty_list = self.acquire_lru_list(LruListName::Dirty);
         lru_dirty_list.len()
     }
 

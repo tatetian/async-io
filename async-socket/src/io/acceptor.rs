@@ -1,23 +1,22 @@
 #[cfg(feature = "sgx")]
 use sgx_trts::libc;
-#[cfg(feature = "sgx")]
-use std::prelude::v1::*;
 use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
+#[cfg(feature = "sgx")]
+use std::prelude::v1::*;
 #[cfg(not(feature = "sgx"))]
 use std::sync::{Arc, Mutex, MutexGuard};
 #[cfg(feature = "sgx")]
 use std::sync::{Arc, SgxMutex as Mutex, SgxMutexGuard as MutexGuard};
 
-use slab::Slab;
-use io_uring_callback::{Handle, Fd};
+use io_uring_callback::{Fd, Handle};
 #[cfg(feature = "sgx")]
 use sgx_untrusted_alloc::UntrustedAllocator;
+use slab::Slab;
 
 use crate::io::{Common, IoUringProvider};
 use crate::poll::{Events, Poller};
 use crate::util::RawSlab;
-
 
 pub struct Acceptor<P: IoUringProvider> {
     common: Arc<Common<P>>,
@@ -180,7 +179,13 @@ impl<P: IoUringProvider> Acceptor<P> {
             };
             let io_uring = self.common.io_uring();
             let handle = unsafe {
-                io_uring.accept(Fd(self.common.fd()), addr as *mut libc::sockaddr, addrlen, flags, callback)
+                io_uring.accept(
+                    Fd(self.common.fd()),
+                    addr as *mut libc::sockaddr,
+                    addrlen,
+                    flags,
+                    callback,
+                )
             };
 
             // Record the pending accept
@@ -206,7 +211,8 @@ impl Inner {
         let mut param_raw_slab_buf = ManuallyDrop::new(Vec::with_capacity(backlog));
         #[cfg(feature = "sgx")]
         let param_raw_slab_buf = ManuallyDrop::new(
-            UntrustedAllocator::new(backlog * core::mem::size_of::<AcceptParam>(), 8).unwrap());
+            UntrustedAllocator::new(backlog * core::mem::size_of::<AcceptParam>(), 8).unwrap(),
+        );
         let param_raw_slab = unsafe {
             let ptr = param_raw_slab_buf.as_mut_ptr() as *mut AcceptParam;
             ManuallyDrop::new(RawSlab::new(ptr, backlog))

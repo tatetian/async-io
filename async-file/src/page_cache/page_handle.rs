@@ -1,12 +1,12 @@
+use std::any::Any;
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
-use std::any::Any;
 #[cfg(not(feature = "sgx"))]
 use std::sync::{Arc, MutexGuard};
 #[cfg(feature = "sgx")]
 use std::sync::{Arc, SgxMutexGuard as MutexGuard};
 
-use crate::page_cache::{AsFd, Page, PageEntry, PageState};
+use crate::page_cache::{Page, PageEntry, PageState};
 
 /// Page handle is the user's view of page entry.
 ///

@@ -1,19 +1,18 @@
+use io_uring_callback::{Fd, Handle};
 #[cfg(feature = "sgx")]
 use sgx_trts::libc;
+#[cfg(feature = "sgx")]
+use sgx_untrusted_alloc::UntrustedAllocator;
+use std::mem::ManuallyDrop;
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
 #[cfg(not(feature = "sgx"))]
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "sgx")]
 use std::sync::{Arc, SgxMutex as Mutex};
-use std::mem::ManuallyDrop;
-use io_uring_callback::{Handle, Fd};
-#[cfg(feature = "sgx")]
-use sgx_untrusted_alloc::UntrustedAllocator;
 
 use crate::io::{Common, IoUringProvider};
 use crate::poll::{Events, Pollee, Poller};
-
 
 pub struct Connector<P: IoUringProvider> {
     common: Arc<Common<P>>,
@@ -55,7 +54,9 @@ impl<P: IoUringProvider> Connector<P> {
             // This method should be called once
             debug_assert!(inner.pending_io.is_some());
 
-            unsafe { **inner.addr = *addr; }
+            unsafe {
+                **inner.addr = *addr;
+            }
             let handle = self.initiate_async_connect(*inner.addr as *const libc::sockaddr_in);
             inner.pending_io.replace(handle);
         }
@@ -88,7 +89,12 @@ impl<P: IoUringProvider> Connector<P> {
 
         let io_uring = self.common.io_uring();
         let handle = unsafe {
-            io_uring.connect(Fd(self.common.fd()), addr as *const libc::sockaddr, core::mem::size_of::<libc::sockaddr_in>() as u32, callback)
+            io_uring.connect(
+                Fd(self.common.fd()),
+                addr as *const libc::sockaddr,
+                core::mem::size_of::<libc::sockaddr_in>() as u32,
+                callback,
+            )
         };
         handle
     }
@@ -112,9 +118,10 @@ impl Inner {
     pub fn new() -> Self {
         #[cfg(not(feature = "sgx"))]
         let addr: *mut libc::sockaddr_in = Box::into_raw(Box::new(unsafe { std::mem::zeroed() }));
-        
+
         #[cfg(feature = "sgx")]
-        let addr_alloc = UntrustedAllocator::new(core::mem::size_of::<libc::sockaddr_in>(), 8).unwrap();
+        let addr_alloc =
+            UntrustedAllocator::new(core::mem::size_of::<libc::sockaddr_in>(), 8).unwrap();
         #[cfg(feature = "sgx")]
         let addr = addr_alloc.as_mut_ptr() as *mut libc::sockaddr_in;
 

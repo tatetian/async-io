@@ -1,8 +1,8 @@
-#[cfg(feature = "sgx")]
-use std::prelude::v1::*;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
+#[cfg(feature = "sgx")]
+use std::prelude::v1::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(feature = "sgx"))]
 use std::sync::Mutex;

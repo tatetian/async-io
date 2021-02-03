@@ -1,8 +1,6 @@
+use std::fmt::Debug;
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
-use std::fmt::Debug;
-use std::ops::Deref;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 
 use atomic::{Atomic, Ordering};

@@ -20,7 +20,11 @@ impl Token {
         let state = Atomic::new(State::Submitted);
         let callback = Mutex::new(Some(Box::new(callback) as _));
         let waker = Mutex::new(None);
-        Self { state, callback, waker }
+        Self {
+            state,
+            callback,
+            waker,
+        }
     }
 
     pub fn complete(&self, retval: i32) -> Box<dyn FnOnce(i32) + 'static> {

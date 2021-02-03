@@ -90,14 +90,20 @@ mod tests {
         assert_eq!(entry.is_none(), true);
         assert_eq!(slab.allocated(), capacity);
         for i in 0..capacity {
-            unsafe { slab.dealloc(ptr_vec[i]); }
+            unsafe {
+                slab.dealloc(ptr_vec[i]);
+            }
         }
         assert_eq!(slab.allocated(), 0);
 
         let value = slab.alloc().unwrap();
-        unsafe { *value = 1; }
+        unsafe {
+            *value = 1;
+        }
         assert_eq!(slab.allocated(), 1);
-        unsafe { slab.dealloc(value); }
+        unsafe {
+            slab.dealloc(value);
+        }
         assert_eq!(slab.allocated(), 0);
     }
 }

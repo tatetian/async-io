@@ -1,10 +1,10 @@
+use std::marker::PhantomData;
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
-use std::marker::PhantomData;
 #[cfg(not(feature = "sgx"))]
-use std::sync::{Arc, RwLock, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 #[cfg(feature = "sgx")]
-use std::sync::{Arc, SgxRwLock as RwLock, SgxMutex as Mutex};
+use std::sync::{Arc, SgxMutex as Mutex, SgxRwLock as RwLock};
 
 use crate::event::waiter::{Waiter, WaiterQueue};
 use crate::file::tracker::SeqRdTracker;
@@ -13,11 +13,11 @@ use crate::util::{align_down, align_up};
 
 pub use self::flusher::Flusher;
 
+use io_uring_callback::{Fd, Handle, IoUring};
 #[cfg(feature = "sgx")]
 use sgx_trts::libc;
 #[cfg(feature = "sgx")]
 use sgx_untrusted_alloc::UntrustedAllocator;
-use io_uring_callback::{IoUring, Handle, Fd};
 
 mod flusher;
 mod tracker;
@@ -56,7 +56,8 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
             (false, true)
         } else if flags & libc::O_RDWR != 0 {
             (true, true)
-        } else { // libc::O_RDONLY = 0
+        } else {
+            // libc::O_RDONLY = 0
             (true, false)
         };
 
@@ -65,7 +66,9 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
             let c_path_ptr = c_path.as_bytes_with_nul().as_ptr() as _;
             let flags = if flags & libc::O_WRONLY != 0 {
                 (flags & !libc::O_WRONLY) | libc::O_RDWR
-            } else { flags };
+            } else {
+                flags
+            };
             #[cfg(not(feature = "sgx"))]
             let fd = libc::open(c_path_ptr, flags, mode);
             #[cfg(feature = "sgx")]
@@ -290,13 +293,15 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
 
         let first_offset = consecutive_pages[0].offset();
         let self_ = self.clone();
-        let iovecs = Box::new(consecutive_pages
-            .iter()
-            .map(|page_handle| libc::iovec {
-                iov_base: page_handle.page().as_mut_ptr() as _,
-                iov_len: Page::size(),
-            })
-            .collect::<Vec<libc::iovec>>());
+        let iovecs = Box::new(
+            consecutive_pages
+                .iter()
+                .map(|page_handle| libc::iovec {
+                    iov_base: page_handle.page().as_mut_ptr() as _,
+                    iov_len: Page::size(),
+                })
+                .collect::<Vec<libc::iovec>>(),
+        );
         #[cfg(not(feature = "sgx"))]
         let (iovecs_ptr, iovecs_len) = ((*iovecs).as_ptr(), (*iovecs).len());
         #[cfg(feature = "sgx")]
@@ -316,7 +321,13 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
                     };
                 }
             }
-            (iovecs_ptr, iovecs_len, allocator, iovecs_ptr as u64, t_iovecs_ptr as u64)
+            (
+                iovecs_ptr,
+                iovecs_len,
+                allocator,
+                iovecs_ptr as u64,
+                t_iovecs_ptr as u64,
+            )
         };
 
         struct IovecsBox(Box<Vec<libc::iovec>>);
@@ -325,7 +336,7 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
 
         let handle_store: Arc<Mutex<Option<Handle>>> = Arc::new(Mutex::new(None));
         let handle_store2 = handle_store.clone();
-        
+
         let callback = move |retval| {
             let page_cache = Rt::page_cache();
             let read_nbytes = if retval >= 0 { retval } else { 0 } as usize;
@@ -354,7 +365,7 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
                 page_cache.release(page);
             }
             self_.waiter_queue.wake_all();
-            
+
             #[cfg(feature = "sgx")]
             {
                 let iovecs_ptr = iovecs_ptr_u64 as *const libc::iovec;
@@ -376,7 +387,14 @@ impl<Rt: AsyncFileRt + ?Sized> AsyncFile<Rt> {
         };
         let io_uring = Rt::io_uring();
         let handle = unsafe {
-            io_uring.readv(Fd(self.fd), iovecs_ptr, iovecs_len as u32, first_offset as i64, 0, callback)
+            io_uring.readv(
+                Fd(self.fd),
+                iovecs_ptr,
+                iovecs_len as u32,
+                first_offset as i64,
+                0,
+                callback,
+            )
         };
         let mut guard = handle_store2.lock().unwrap();
         guard.replace(handle);
@@ -549,7 +567,5 @@ fn errno() -> i32 {
 
 #[cfg(feature = "sgx")]
 fn errno() -> i32 {
-    unsafe {
-        libc::errno()
-    }
+    unsafe { libc::errno() }
 }

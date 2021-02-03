@@ -1,6 +1,6 @@
+use std::any::Any;
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
-use std::any::Any;
 #[cfg(not(feature = "sgx"))]
 use std::sync::{Arc, Mutex, MutexGuard};
 #[cfg(feature = "sgx")]

@@ -1,12 +1,10 @@
+use std::ops::RangeInclusive;
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
-use std::ops::RangeInclusive;
 #[cfg(not(feature = "sgx"))]
 use std::sync::{Mutex, MutexGuard};
 #[cfg(feature = "sgx")]
 use std::sync::{SgxMutex as Mutex, SgxMutexGuard as MutexGuard};
-
-use itertools::Itertools;
 
 use crate::page_cache::Page;
 
@@ -57,7 +55,7 @@ impl SeqRdTracker {
         // thread of sequential reads starting from this read.
         let mut victim_tracker_opt: Option<MutexGuard<'_, Tracker>> = None;
         for (tracker_i, tracker_lock) in self.trackers.iter().enumerate() {
-            let mut tracker = match tracker_lock.try_lock().ok() {
+            let tracker = match tracker_lock.try_lock().ok() {
                 Some(tracker) => tracker,
                 None => continue,
             };

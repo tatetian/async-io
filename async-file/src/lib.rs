@@ -11,9 +11,9 @@ extern crate sgx_types;
 #[macro_use]
 extern crate sgx_tstd as std;
 #[cfg(feature = "sgx")]
-extern crate sgx_trts;
-#[cfg(feature = "sgx")]
 extern crate sgx_libc as libc;
+#[cfg(feature = "sgx")]
+extern crate sgx_trts;
 #[cfg(feature = "sgx")]
 extern crate sgx_untrusted_alloc;
 
@@ -31,8 +31,8 @@ mod tests {
     use self::runtime::Runtime;
     use super::*;
     use crate::event::waiter::{Waiter, WaiterQueue};
+    use io_uring_callback::{Builder, IoUring};
     use lazy_static::lazy_static;
-    use io_uring_callback::{IoUring, Builder};
 
     #[test]
     fn hello_world() {
@@ -78,7 +78,7 @@ mod tests {
             };
 
             let data_len = 4096 * 1024;
-            let mut data : Vec<u8> = Vec::with_capacity(data_len);
+            let mut data: Vec<u8> = Vec::with_capacity(data_len);
             for i in 0..data_len {
                 let ch = (i % 128) as u8;
                 data.push(ch);
@@ -124,15 +124,14 @@ mod tests {
     //     }
     //     drop(rng);
 
-
     //     async_rt::task::block_on(async {
     //         prepare_file(file_num).await;
-            
+
     //         let mut join_handles: Vec<JoinHandle<i32>> = (0..file_num)
     //             .map(|i| {
     //                 async_rt::task::spawn(async move {
     //                     let start = Instant::now();
-                        
+
     //                     let file = {
     //                         let path = format!("tmp.data.{}", i).to_string();
     //                         let flags = libc::O_RDWR;
@@ -162,7 +161,7 @@ mod tests {
     //                     }
 
     //                     file.flush().await;
-                        
+
     //                     let duration = start.elapsed();
     //                     println!("Time elapsed in random task {} [file_size: {}, block_size: {}] is: {:?}", i, FILE_LEN, block_size, duration);
     //                     i as i32
