@@ -71,9 +71,6 @@ impl IoUring {
         if let Err(entry) = self.inner.submission().push(entry) {
             panic!("sq must be large enough");
         }
-        if let Err(e) = self.inner.submit() {
-            panic!("submit failed, error: {}", e);
-        }
 
         let handle = self.gen_handle(token_idx);
         handle
@@ -95,9 +92,6 @@ impl IoUring {
         if let Err(entry) = self.inner.submission().push(entry) {
             panic!("sq must be large enough");
         }
-        if let Err(e) = self.inner.submit() {
-            panic!("submit failed, error: {}", e);
-        }
 
         let handle = self.gen_handle(token_idx);
         handle
@@ -118,9 +112,6 @@ impl IoUring {
         if let Err(entry) = self.inner.submission().push(entry) {
             panic!("sq must be large enough");
         }
-        if let Err(e) = self.inner.submit() {
-            panic!("submit failed, error: {}", e);
-        }
 
         let handle = self.gen_handle(token_idx);
         handle
@@ -138,9 +129,6 @@ impl IoUring {
             .user_data(token_idx as _);
         if let Err(entry) = self.inner.submission().push(entry) {
             panic!("sq must be large enough");
-        }
-        if let Err(e) = self.inner.submit() {
-            panic!("submit failed, error: {}", e);
         }
 
         let handle = self.gen_handle(token_idx);
@@ -167,9 +155,6 @@ impl IoUring {
         if let Err(entry) = self.inner.submission().push(entry) {
             panic!("sq must be large enough");
         }
-        if let Err(e) = self.inner.submit() {
-            panic!("submit failed, error: {}", e);
-        }
 
         let handle = self.gen_handle(token_idx);
         handle
@@ -194,9 +179,6 @@ impl IoUring {
             .user_data(token_idx as _);
         if let Err(entry) = self.inner.submission().push(entry) {
             panic!("sq must be large enough");
-        }
-        if let Err(e) = self.inner.submit() {
-            panic!("submit failed, error: {}", e);
         }
 
         let handle = self.gen_handle(token_idx);
@@ -223,9 +205,6 @@ impl IoUring {
         if let Err(entry) = self.inner.submission().push(entry) {
             panic!("sq must be large enough");
         }
-        if let Err(e) = self.inner.submit() {
-            panic!("submit failed, error: {}", e);
-        }
 
         let handle = self.gen_handle(token_idx);
         handle
@@ -251,9 +230,6 @@ impl IoUring {
         if let Err(entry) = self.inner.submission().push(entry) {
             panic!("sq must be large enough");
         }
-        if let Err(e) = self.inner.submit() {
-            panic!("submit failed, error: {}", e);
-        }
 
         let handle = self.gen_handle(token_idx);
         handle
@@ -275,9 +251,6 @@ impl IoUring {
             .user_data(token_idx as _);
         if let Err(entry) = self.inner.submission().push(entry) {
             panic!("sq must be large enough");
-        }
-        if let Err(e) = self.inner.submit() {
-            panic!("submit failed, error: {}", e);
         }
 
         let handle = self.gen_handle(token_idx);
@@ -301,9 +274,6 @@ impl IoUring {
         if let Err(entry) = self.inner.submission().push(entry) {
             panic!("sq must be large enough");
         }
-        if let Err(e) = self.inner.submit() {
-            panic!("submit failed, error: {}", e);
-        }
 
         let handle = self.gen_handle(token_idx);
         handle
@@ -320,6 +290,16 @@ impl IoUring {
             let callback = token.complete(retval);
             drop(token_slab);
             (callback)(retval);
+        }
+    }
+
+    pub unsafe fn start_enter_syscall_thread(&self) {
+        self.inner.start_enter_syscall_thread();
+    }
+
+    pub fn submit(&self) {
+        if let Err(e) = self.inner.submit() {
+            panic!("submit failed, error: {}", e);
         }
     }
 
@@ -506,6 +486,7 @@ mod tests {
                 complete_fn,
             )
         };
+        io_uring.submit();
         loop {
             io_uring.trigger_callbacks();
 
@@ -533,6 +514,7 @@ mod tests {
                 complete_fn,
             )
         };
+        io_uring.submit();
         loop {
             io_uring.trigger_callbacks();
 

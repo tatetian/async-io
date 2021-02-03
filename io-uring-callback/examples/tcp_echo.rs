@@ -70,6 +70,7 @@ impl AcceptCount {
 
 fn main() {
     let ring = Builder::new().build(256).unwrap();
+    unsafe { ring.start_enter_syscall_thread(); }
     let listener = TcpListener::bind(("127.0.0.1", 3456)).unwrap();
 
     let mut bufpool = Vec::with_capacity(64);

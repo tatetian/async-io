@@ -110,6 +110,7 @@ pub extern "C" fn run_sgx_example() -> sgx_status_t {
     println!("[ECALL] run_sgx_example");
 
     let ring = Builder::new().build(256).unwrap();
+    unsafe { ring.start_enter_syscall_thread(); }
 
     let socket_fd = {
         let socket_fd = unsafe { libc::ocall::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
