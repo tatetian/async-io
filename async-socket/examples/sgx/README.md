@@ -1,6 +1,6 @@
 ## tcp_echo example for SGX
-This is an example of using io-uring-callback in SGX. 
-This example combines tcp_echo example of io-uring-callback and hello-rust example of incubator-teaclave-sgx-sdk.
+This is an example of using async-socket in SGX. 
+This example combines tcp_echo example of async-socket and hello-rust example of incubator-teaclave-sgx-sdk.
 - ./app : untrusted code
 - ./bin : executable program
 - ./enclave : trusted code
