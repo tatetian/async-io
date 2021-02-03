@@ -240,6 +240,7 @@ mod tests {
         async_rt::executor::set_parallelism(1).unwrap();
 
         let ring = &runtime::RING;
+        unsafe { ring.start_enter_syscall_thread(); }
         let actor = move || {
             ring.trigger_callbacks();
         };
