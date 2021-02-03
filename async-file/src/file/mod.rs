@@ -567,5 +567,5 @@ fn errno() -> i32 {
 
 #[cfg(feature = "sgx")]
 fn errno() -> i32 {
-    unsafe { libc::errno() }
+    libc::errno()
 }

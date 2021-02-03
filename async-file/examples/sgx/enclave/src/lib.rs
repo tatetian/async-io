@@ -34,12 +34,6 @@ extern crate lazy_static;
 use sgx_trts::libc;
 use sgx_types::*;
 use std::prelude::v1::*;
-use std::os::unix::io::RawFd;
-use std::collections::VecDeque;
-use std::ptr;
-use std::sync::SgxMutex as Mutex;
-
-use lazy_static::lazy_static;
 
 include!("../../../common.in");
 

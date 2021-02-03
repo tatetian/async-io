@@ -26,24 +26,23 @@ extern crate sgx_types;
 #[macro_use]
 extern crate sgx_tstd as std;
 
-extern crate io_uring_callback;
 extern crate io_uring;
-extern crate slab;
+extern crate io_uring_callback;
 extern crate lazy_static;
+extern crate slab;
 
 use sgx_trts::libc;
 use sgx_types::*;
-use std::prelude::v1::*;
-use std::os::unix::io::RawFd;
 use std::collections::VecDeque;
+use std::os::unix::io::RawFd;
+use std::prelude::v1::*;
 use std::ptr;
 use std::sync::SgxMutex as Mutex;
 
-use io_uring_callback::{Builder, Handle, IoUring};
 use io_uring::opcode::types;
+use io_uring_callback::{Builder, Handle, IoUring};
 use lazy_static::lazy_static;
 use slab::Slab;
-
 
 lazy_static! {
     static ref TOKEN_QUEUE: Mutex<VecDeque<(Token, i32)>> = Mutex::new(VecDeque::new());
@@ -97,7 +96,7 @@ impl AcceptCount {
 
             let handle =
                 unsafe { ring.accept(self.fd, ptr::null_mut(), ptr::null_mut(), 0, complete_fn) };
-            
+
             slab_entry.insert(handle);
 
             self.count -= 1;
