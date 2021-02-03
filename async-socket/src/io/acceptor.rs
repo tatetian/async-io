@@ -1,5 +1,3 @@
-#[cfg(feature = "sgx")]
-use sgx_trts::libc;
 use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
 #[cfg(feature = "sgx")]
