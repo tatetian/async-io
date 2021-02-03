@@ -6,8 +6,6 @@ use futures::future::BoxFuture;
 use io_uring_callback::Fd;
 use itertools::Itertools;
 #[cfg(feature = "sgx")]
-use sgx_trts::libc;
-#[cfg(feature = "sgx")]
 use sgx_untrusted_alloc::UntrustedAllocator;
 
 use crate::file::{AsyncFile, AsyncFileRt};

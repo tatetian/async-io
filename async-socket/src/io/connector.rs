@@ -1,7 +1,5 @@
 use io_uring_callback::{Fd, Handle};
 #[cfg(feature = "sgx")]
-use sgx_trts::libc;
-#[cfg(feature = "sgx")]
 use sgx_untrusted_alloc::UntrustedAllocator;
 use std::mem::ManuallyDrop;
 #[cfg(feature = "sgx")]

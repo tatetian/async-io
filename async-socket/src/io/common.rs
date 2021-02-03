@@ -1,6 +1,4 @@
 #[cfg(feature = "sgx")]
-use sgx_trts::libc;
-#[cfg(feature = "sgx")]
 use std::prelude::v1::*;
 
 use atomic::{Atomic, Ordering};

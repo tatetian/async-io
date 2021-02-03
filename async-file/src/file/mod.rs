@@ -15,8 +15,6 @@ pub use self::flusher::Flusher;
 
 use io_uring_callback::{Fd, Handle, IoUring};
 #[cfg(feature = "sgx")]
-use sgx_trts::libc;
-#[cfg(feature = "sgx")]
 use sgx_untrusted_alloc::UntrustedAllocator;
 
 mod flusher;

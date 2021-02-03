@@ -11,7 +11,7 @@ crate-type = ["staticlib"]
 default = []
 
 [dependencies]
-async-file = { path = "../../../../async-file", default-features = false, features = ["sgx"] }
+async-file = { path = "../../../../async-file", features = ["sgx"] }
 async-rt = { path = "../../../../async-rt", features = ["sgx"] }
 io-uring-callback = { path = "../../../../io-uring-callback", features = ["sgx"] }
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }

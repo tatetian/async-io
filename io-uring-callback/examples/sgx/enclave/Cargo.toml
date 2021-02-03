@@ -11,7 +11,7 @@ default = []
 
 [dependencies]
 io-uring-callback = { path = "../../../../io-uring-callback", features = ["sgx"] }
-io-uring = { path = "../../../../third_parties/io-uring", default-features = false, features = ["sgx"] }
+io-uring = { path = "../../../../third_parties/io-uring", features = ["sgx"] }
 slab = { git = "https://github.com/tokio-rs/slab.git", default-features = false }
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 
