@@ -219,7 +219,6 @@ mod tests {
         assert_eq!(cbuf.consumable(), 0);
         assert_eq!(cbuf.producible(), capacity - 1);
 
-
         let mut data: Vec<u8> = vec![0; capacity * 2];
         // produce case
         // case 1.1: tail >= head && head > 0
@@ -230,7 +229,7 @@ mod tests {
         // consume case
         // case 1:   head <= tail
         // case 2:   head > tail
-        
+
         // produce case 1.2
         let mut beg: usize = 0;
         let mut end: usize = 500;
@@ -304,7 +303,6 @@ mod tests {
         assert_eq!(cbuf.is_full(), false);
         assert_eq!(cbuf.consumable(), 0);
         assert_eq!(cbuf.producible(), capacity - 1);
-
 
         let data: Vec<u8> = vec![0; capacity * 2];
 

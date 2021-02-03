@@ -1,6 +1,5 @@
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
-use std::sync::atomic::AtomicUsize;
 #[cfg(not(feature = "sgx"))]
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "sgx")]
@@ -8,7 +7,6 @@ use std::sync::{Arc, SgxMutex as Mutex};
 
 use atomic::{Atomic, Ordering};
 use intrusive_collections::intrusive_adapter;
-use intrusive_collections::linked_list::Iter;
 use intrusive_collections::{LinkedList, LinkedListLink};
 
 use crate::event::counter::Counter;
@@ -97,7 +95,7 @@ impl WaiterQueue {
     }
 
     pub fn wake_all(&self) {
-        let mut inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap();
         inner
             .list
             .iter()

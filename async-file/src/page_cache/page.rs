@@ -1,6 +1,6 @@
+use std::cell::UnsafeCell;
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
-use std::cell::UnsafeCell;
 
 pub struct Page {
     // TODO: for SGX, this buffer needs to be allocated from a different source.

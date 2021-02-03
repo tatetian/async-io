@@ -7,9 +7,9 @@ extern crate sgx_types;
 #[macro_use]
 extern crate sgx_tstd as std;
 #[cfg(feature = "sgx")]
-extern crate sgx_trts;
-#[cfg(feature = "sgx")]
 extern crate sgx_libc as libc;
+#[cfg(feature = "sgx")]
+extern crate sgx_trts;
 
 extern crate atomic;
 extern crate io_uring;
@@ -20,15 +20,15 @@ extern crate slab;
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
 
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
 use std::io;
 use std::sync::Arc;
 #[cfg(not(feature = "sgx"))]
 use std::sync::Mutex;
 #[cfg(feature = "sgx")]
 use std::sync::SgxMutex as Mutex;
-use core::future::Future;
-use core::pin::Pin;
-use core::task::{Context, Poll, Waker};
 
 use io_uring::opcode::{self, types};
 use slab::Slab;
@@ -349,11 +349,21 @@ pub struct Handle {
 
 impl Handle {
     pub fn retval(&self) -> Option<i32> {
-        TOKEN_SLAB.lock().unwrap().get(self.token_idx).unwrap().retval()
+        TOKEN_SLAB
+            .lock()
+            .unwrap()
+            .get(self.token_idx)
+            .unwrap()
+            .retval()
     }
 
     pub fn is_completed(&self) -> bool {
-        TOKEN_SLAB.lock().unwrap().get(self.token_idx).unwrap().is_completed()
+        TOKEN_SLAB
+            .lock()
+            .unwrap()
+            .get(self.token_idx)
+            .unwrap()
+            .is_completed()
     }
 
     pub fn cancel(&self) {
@@ -369,7 +379,12 @@ impl Handle {
     }
 
     pub fn set_waker(&self, waker: Waker) {
-        TOKEN_SLAB.lock().unwrap().get(self.token_idx).unwrap().set_waker(waker);
+        TOKEN_SLAB
+            .lock()
+            .unwrap()
+            .get(self.token_idx)
+            .unwrap()
+            .set_waker(waker);
     }
 }
 

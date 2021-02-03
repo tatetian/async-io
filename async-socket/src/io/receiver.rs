@@ -1,22 +1,21 @@
 #[cfg(feature = "sgx")]
 use sgx_trts::libc;
+use std::mem::ManuallyDrop;
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
-use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ptr::{self, NonNull};
 #[cfg(not(feature = "sgx"))]
 use std::sync::{Arc, Mutex, MutexGuard};
 #[cfg(feature = "sgx")]
 use std::sync::{Arc, SgxMutex as Mutex, SgxMutexGuard as MutexGuard};
 
-use io_uring_callback::{Handle, Fd};
+use io_uring_callback::{Fd, Handle};
 #[cfg(feature = "sgx")]
 use sgx_untrusted_alloc::UntrustedAllocator;
 
 use crate::io::{Common, IoUringProvider};
 use crate::poll::{Events, Poller};
 use crate::util::CircularBuf;
-
 
 pub struct Receiver<P: IoUringProvider> {
     common: Arc<Common<P>>,
@@ -95,11 +94,11 @@ impl<P: IoUringProvider> Receiver<P> {
             // Mark the socket as non-readable
             self.common.pollee().remove(Events::IN);
         }
-        
+
         if inner.end_of_file {
             return nbytes as i32;
         }
-        
+
         if nbytes == 0 {
             if let Some(error) = self.common.error() {
                 return error;
@@ -186,9 +185,7 @@ impl<P: IoUringProvider> Receiver<P> {
 
         // Submit the async flush to io_uring
         let io_uring = &self.common.io_uring();
-        let handle = unsafe {
-            io_uring.recvmsg(Fd(self.common.fd()), msg_ptr, 0, complete_fn)
-        };
+        let handle = unsafe { io_uring.recvmsg(Fd(self.common.fd()), msg_ptr, 0, complete_fn) };
         inner.pending_io.replace(handle);
     }
 
@@ -221,10 +218,10 @@ impl Inner {
         };
         let pending_io = None;
         let end_of_file = false;
-        
+
         #[cfg(not(feature = "sgx"))]
         let msg_param: *mut MsgParam = Box::into_raw(Box::new(unsafe { std::mem::zeroed() }));
-        
+
         #[cfg(feature = "sgx")]
         let msg_param_alloc = UntrustedAllocator::new(core::mem::size_of::<MsgParam>(), 8).unwrap();
         #[cfg(feature = "sgx")]
@@ -257,7 +254,7 @@ impl Drop for Inner {
             drop(Box::from_raw(*self.msg_param));
 
             ManuallyDrop::drop(&mut self.msg_param);
-            
+
             #[cfg(feature = "sgx")]
             ManuallyDrop::drop(&mut self.msg_param_alloc);
         }

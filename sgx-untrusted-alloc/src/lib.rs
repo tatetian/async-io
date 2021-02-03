@@ -9,11 +9,11 @@ extern crate buddy_system_allocator;
 
 use buddy_system_allocator::LockedHeap;
 use sgx_trts::libc;
-use std::prelude::v1::*;
 use std::alloc::Layout;
+use std::prelude::v1::*;
 use std::ptr::NonNull;
-use std::sync::Once;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Once;
 
 static HEAP_ALLOCATOR: LockedHeap = LockedHeap::empty();
 

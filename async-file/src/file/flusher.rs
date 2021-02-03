@@ -1,18 +1,17 @@
+use std::marker::PhantomData;
 #[cfg(feature = "sgx")]
 use std::prelude::v1::*;
-use std::future::Future;
-use std::marker::PhantomData;
 
+use futures::future::BoxFuture;
+use io_uring_callback::Fd;
+use itertools::Itertools;
 #[cfg(feature = "sgx")]
 use sgx_trts::libc;
 #[cfg(feature = "sgx")]
 use sgx_untrusted_alloc::UntrustedAllocator;
-use futures::future::{BoxFuture, FutureExt};
-use itertools::Itertools;
-use io_uring_callback::{IoUring, Fd};
 
 use crate::file::{AsyncFile, AsyncFileRt};
-use crate::page_cache::{Page, PageCache, PageHandle, PageState};
+use crate::page_cache::{Page, PageHandle, PageState};
 
 /// Flush dirty pages in a page cache.
 pub struct Flusher<Rt: AsyncFileRt + ?Sized> {
@@ -27,12 +26,12 @@ impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
     }
 
     pub async fn flush_by_fd(&self, fd: i32, max_pages: usize) -> usize {
-        let mut dirty_pages = Rt::page_cache().evict_dirty_pages_by_fd(fd, max_pages);
+        let dirty_pages = Rt::page_cache().evict_dirty_pages_by_fd(fd, max_pages);
         self.do_flush(dirty_pages).await
     }
 
     pub async fn flush(&self, max_pages: usize) -> usize {
-        let mut dirty_pages = Rt::page_cache().evict_dirty_pages(max_pages);
+        let dirty_pages = Rt::page_cache().evict_dirty_pages(max_pages);
         self.do_flush(dirty_pages).await
     }
 
@@ -129,13 +128,15 @@ impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
         offset: usize,
         mut consecutive_pages: Vec<PageHandle>,
     ) -> BoxFuture<'static, i32> {
-        let iovecs: Box<Vec<libc::iovec>> = Box::new(consecutive_pages
-            .iter()
-            .map(|page| libc::iovec {
-                iov_base: page.page().as_mut_ptr() as _,
-                iov_len: Page::size(),
-            })
-            .collect());
+        let iovecs: Box<Vec<libc::iovec>> = Box::new(
+            consecutive_pages
+                .iter()
+                .map(|page| libc::iovec {
+                    iov_base: page.page().as_mut_ptr() as _,
+                    iov_len: Page::size(),
+                })
+                .collect(),
+        );
         #[cfg(not(feature = "sgx"))]
         let (iovecs_ptr, iovecs_len) = ((*iovecs).as_ptr(), (*iovecs).len());
         #[cfg(feature = "sgx")]
@@ -163,7 +164,7 @@ impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
             }
             (iovecs_ptr, iovecs_len, allocator)
         };
-        
+
         struct IovecsBox(Box<Vec<libc::iovec>>);
         unsafe impl Send for IovecsBox {}
         let iovecs_box = IovecsBox(iovecs);
@@ -201,7 +202,14 @@ impl<Rt: AsyncFileRt + ?Sized> Flusher<Rt> {
         };
         let io_uring = Rt::io_uring();
         let handle = unsafe {
-            io_uring.writev(Fd(fd), iovecs_ptr, iovecs_len as u32, offset as i64, 0, complete_fn)
+            io_uring.writev(
+                Fd(fd),
+                iovecs_ptr,
+                iovecs_len as u32,
+                offset as i64,
+                0,
+                complete_fn,
+            )
         };
         Box::pin(handle)
     }
