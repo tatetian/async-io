@@ -4,20 +4,26 @@ use core::ptr::{self};
 use crate::prelude::*;
 use crate::task::Task;
 
-pub fn current() -> Arc<Task> {
-    let ptr = CURRENT.get();
-    assert!(ptr != ptr::null());
-    let current_task = unsafe { Arc::from_raw(ptr) };
-    Arc::into_raw(current_task.clone());
-    current_task
+pub fn get() -> Arc<Task> {
+    try_get().unwrap()
 }
 
-pub(crate) fn set_current(task: Arc<Task>) {
+pub fn try_get() -> Option<Arc<Task>> {
+    let ptr = CURRENT.get();
+    if ptr == ptr::null() {
+        return None;
+    }
+    let current_task = unsafe { Arc::from_raw(ptr) };
+    Arc::into_raw(current_task.clone());
+    Some(current_task)
+}
+
+pub(crate) fn set(task: Arc<Task>) {
     let last_ptr = CURRENT.replace(Arc::into_raw(task));
     free_task_ptr(last_ptr);
 }
 
-pub(crate) fn reset_current() {
+pub(crate) fn reset() {
     let last_ptr = CURRENT.replace(ptr::null());
     free_task_ptr(last_ptr);
 }
